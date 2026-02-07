@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pier — Local Dev Domains</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔩 Pier</h1>
+            <span class="version" id="version">v0.1.0</span>
+        </header>
+
+        <div class="status-bar" id="status-bar">
+            <span class="status-item" id="status-traefik">⏳ Checking...</span>
+        </div>
+
+        <main>
+            <div class="section-header">
+                <h2>Active Services</h2>
+                <button class="btn-refresh" onclick="loadServices()">🔄 Refresh</button>
+            </div>
+
+            <div id="services-list" class="services-list">
+                <div class="loading">Loading services...</div>
+            </div>
+
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <p>No services found.</p>
+                <p class="hint">Add a Docker container to the <code>pier</code> network, or run:</p>
+                <code class="command">pier proxy &lt;name&gt; &lt;port&gt;</code>
+            </div>
+        </main>
+
+        <footer>
+            <div class="footer-links">
+                <a href="http://127.0.0.1:8881" target="_blank">📊 Traefik Dashboard</a>
+                <span class="separator">•</span>
+                <a href="https://github.com/eshe-huli/pier" target="_blank">GitHub</a>
+            </div>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
