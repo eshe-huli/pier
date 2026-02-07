@@ -5,7 +5,7 @@ class Pier < Formula
   desc "Clean .dock domains for Docker containers and local processes"
   homepage "https://github.com/eshe-huli/pier"
   url "https://github.com/eshe-huli/pier/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "" # Updated on release
+  sha256 "a02919a38cff853859446b5c8aedb2e40e305dae32f279950c90393dd61d2e2b"
   license "MIT"
   head "https://github.com/eshe-huli/pier.git", branch: "main"
 
