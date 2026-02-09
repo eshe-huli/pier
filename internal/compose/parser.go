@@ -144,14 +144,38 @@ func parseEnvironment(env interface{}) map[string]string {
 			if s, ok := item.(string); ok {
 				parts := strings.SplitN(s, "=", 2)
 				if len(parts) == 2 {
-					result[parts[0]] = parts[1]
+					result[parts[0]] = resolveEnvVar(parts[1])
 				}
 			}
 		}
 	case map[string]interface{}:
 		for k, val := range v {
-			result[k] = fmt.Sprintf("%v", val)
+			result[k] = resolveEnvVar(fmt.Sprintf("%v", val))
 		}
 	}
 	return result
+}
+
+// resolveEnvVar resolves ${VAR:-default} and ${VAR} patterns
+// to their default values (for local dev, we don't have the host env)
+func resolveEnvVar(val string) string {
+	// Match ${VAR:-default} → use default
+	for strings.Contains(val, "${") {
+		start := strings.Index(val, "${")
+		end := strings.Index(val[start:], "}")
+		if end == -1 {
+			break
+		}
+		end += start
+		expr := val[start+2 : end]
+		var replacement string
+		if idx := strings.Index(expr, ":-"); idx != -1 {
+			replacement = expr[idx+2:]
+		} else {
+			// ${VAR} with no default → empty
+			replacement = ""
+		}
+		val = val[:start] + replacement + val[end+1:]
+	}
+	return val
 }

@@ -205,7 +205,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Inject DATABASE_NAME
-	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", projectName))
+	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", strings.ReplaceAll(projectName, "-", "_")))
 	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DB_DATABASE=%s", strings.ReplaceAll(projectName, "-", "_")))
 
 	// Pierfile extra env
@@ -342,16 +342,17 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 		// Run
 		dockerArgs := []string{"run", "-d", "--name", appName, "--network", cfg.Network, "--restart", "unless-stopped"}
 
-		for _, e := range envOverrides {
-			dockerArgs = append(dockerArgs, "-e", e)
-		}
-		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", projectName))
-	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DB_DATABASE=%s", strings.ReplaceAll(projectName, "-", "_")))
-
-		// Compose environment vars
+		// Compose environment vars first (lower priority)
 		for k, v := range app.Environment {
 			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
 		}
+
+		// Pier env overrides last (higher priority — override compose)
+		for _, e := range envOverrides {
+			dockerArgs = append(dockerArgs, "-e", e)
+		}
+		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", strings.ReplaceAll(projectName, "-", "_")))
+		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DB_DATABASE=%s", strings.ReplaceAll(projectName, "-", "_")))
 
 		// Traefik labels
 		dockerArgs = append(dockerArgs,
@@ -469,7 +470,7 @@ func runUpBuild(dir, projectName string, cfg *config.Config, sharedServices []in
 	for _, e := range envOverrides {
 		dockerArgs = append(dockerArgs, "-e", e)
 	}
-	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", projectName))
+	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", strings.ReplaceAll(projectName, "-", "_")))
 	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DB_DATABASE=%s", strings.ReplaceAll(projectName, "-", "_")))
 	if pf != nil {
 		for k, v := range pf.Env {

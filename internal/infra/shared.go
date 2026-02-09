@@ -247,6 +247,10 @@ func GetConnectionEnv(name, version string) map[string]string {
 		env["DB_SYNC"] = "true"
 		env["DATABASE_HOST"] = cname
 		env["DATABASE_PORT"] = fmt.Sprintf("%d", def.Port)
+		env["DATABASE_USER"] = "pier"
+		env["DATABASE_PASSWORD"] = "pier"
+		env["DATABASE_NAME"] = "" // set by caller with project name
+		env["DATABASE_SYNCHRONIZE"] = "true"
 		env["DATABASE_URL"] = fmt.Sprintf("postgres://pier:pier@%s:%d", cname, def.Port)
 		env["POSTGRES_HOST"] = cname
 		env["POSTGRES_PORT"] = fmt.Sprintf("%d", def.Port)
