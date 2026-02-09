@@ -27,7 +27,7 @@ var upCmd = &cobra.Command{
 	Short: "Build and run the current project",
 	Long: `Detect services, build the app, and run it on the pier network.
 
-Pier reads from .pierfile, docker-compose.yml, or auto-detects the framework.
+Pier reads from Pierfile, docker-compose.yml, or auto-detects the framework.
 Shared infrastructure (postgres, redis, etc.) is started automatically.
 
 Examples:
@@ -62,7 +62,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if pierfile.Exists(dir) {
 		pf, err = pierfile.Load(dir)
 		if err != nil {
-			return fmt.Errorf("loading .pierfile: %w", err)
+			return fmt.Errorf("loading Pierfile: %w", err)
 		}
 		if pf.Name != "" {
 			projectName = pf.Name

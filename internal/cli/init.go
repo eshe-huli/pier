@@ -33,7 +33,7 @@ If Pier is not set up yet (no Traefik, no pier network):
   → System init: Docker network, Traefik, DNS configuration
 
 If Pier is already running AND you're in a project directory:
-  → Project init: detect framework, generate .pier + Dockerfile
+  → Project init: detect framework, generate Pierfile + Dockerfile
 
 Flags:
   --system    Force system init even inside a project
@@ -154,7 +154,7 @@ func runProjectInitLogic(dir string) error {
 		pf.Services = append(pf.Services, s.String())
 	}
 	if err := pierfile.Save(dir, pf); err != nil {
-		return fmt.Errorf("writing .pier: %w", err)
+		return fmt.Errorf("writing Pierfile: %w", err)
 	}
 	fmt.Printf("  📄 Generated: .pier\n")
 
