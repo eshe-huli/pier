@@ -15,6 +15,7 @@ import (
 	"github.com/eshe-huli/pier/internal/detect"
 	"github.com/eshe-huli/pier/internal/docker"
 	"github.com/eshe-huli/pier/internal/infra"
+	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/pierfile"
 	"github.com/eshe-huli/pier/internal/runtime"
 )
@@ -53,6 +54,9 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	// Ensure .pier/ is in .gitignore
+	_ = gitignore.EnsurePierIgnored(dir)
 
 	fmt.Println()
 

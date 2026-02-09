@@ -13,6 +13,7 @@ import (
 
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/detect"
+	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/dns"
 	"github.com/eshe-huli/pier/internal/docker"
 	"github.com/eshe-huli/pier/internal/pierfile"
@@ -156,7 +157,14 @@ func runProjectInitLogic(dir string) error {
 	if err := pierfile.Save(dir, pf); err != nil {
 		return fmt.Errorf("writing Pierfile: %w", err)
 	}
-	fmt.Printf("  📄 Generated: .pier\n")
+	fmt.Printf("  📄 Generated: Pierfile\n")
+
+	// Ensure .pier/ is in .gitignore
+	if err := gitignore.EnsurePierIgnored(dir); err != nil {
+		fmt.Printf("  ⚠️  Could not update .gitignore: %s\n", err)
+	} else {
+		fmt.Printf("  📄 Updated: .gitignore (.pier/ added)\n")
+	}
 
 	// Summary
 	fmt.Println()
