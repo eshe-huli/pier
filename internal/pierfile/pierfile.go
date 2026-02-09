@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const FileName = ".pier"
+const FileName = ".pierfile"
 
 type Pierfile struct {
 	Name     string            `yaml:"name"`

@@ -27,7 +27,7 @@ var upCmd = &cobra.Command{
 	Short: "Build and run the current project",
 	Long: `Detect services, build the app, and run it on the pier network.
 
-Pier reads from .pier, docker-compose.yml, or auto-detects the framework.
+Pier reads from .pierfile, docker-compose.yml, or auto-detects the framework.
 Shared infrastructure (postgres, redis, etc.) is started automatically.
 
 Examples:
@@ -62,7 +62,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if pierfile.Exists(dir) {
 		pf, err = pierfile.Load(dir)
 		if err != nil {
-			return fmt.Errorf("loading .pier: %w", err)
+			return fmt.Errorf("loading .pierfile: %w", err)
 		}
 		if pf.Name != "" {
 			projectName = pf.Name
@@ -300,6 +300,17 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 
 	envOverrides := runtime.BuildEnvOverrides(sharedServices)
 
+	// Generate .pier/env from project .env + pier overrides
+	dbName := strings.ReplaceAll(projectName, "-", "_")
+	allOverrides := append(envOverrides,
+		fmt.Sprintf("DATABASE_NAME=%s", dbName),
+		fmt.Sprintf("DB_DATABASE=%s", dbName),
+	)
+	pierEnvFile, envErr := runtime.GenerateEnvFile(dir, allOverrides)
+	if envErr != nil {
+		warn(fmt.Sprintf("Could not generate .pier/env: %s", envErr))
+	}
+
 	// If no app services in compose, fall through to normal build (Dockerfile + .pier)
 	if len(appSvcs) == 0 {
 		return runUpBuild(dir, projectName, cfg, sharedServices, dbCreated)
@@ -342,12 +353,18 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 		// Run
 		dockerArgs := []string{"run", "-d", "--name", appName, "--network", cfg.Network, "--restart", "unless-stopped"}
 
-		// Compose environment vars first (lower priority)
+		// For built apps: use .pier/env file (clean, no baked-in env)
+		// For sidecars (image-only): pass env vars individually
+		if app.Build != "" && pierEnvFile != "" {
+			dockerArgs = append(dockerArgs, "--env-file", pierEnvFile)
+		}
+
+		// Compose environment vars (lower priority)
 		for k, v := range app.Environment {
 			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
 		}
 
-		// Pier env overrides last (higher priority — override compose)
+		// Pier env overrides (highest priority)
 		for _, e := range envOverrides {
 			dockerArgs = append(dockerArgs, "-e", e)
 		}

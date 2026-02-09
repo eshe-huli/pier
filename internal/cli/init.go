@@ -117,19 +117,27 @@ func runProjectInitLogic(dir string) error {
 		fmt.Printf("  📦 No services detected\n")
 	}
 
-	// 3. Generate Dockerfile if needed
-	dockerfilePath := filepath.Join(dir, "Dockerfile")
+	// 3. Generate Dockerfile if needed (into .pier/ — never touch project root)
+	pierDir := filepath.Join(dir, ".pier")
+	_ = os.MkdirAll(pierDir, 0755)
+	projectDockerfile := filepath.Join(dir, "Dockerfile")
+	pierDockerfile := filepath.Join(pierDir, "Dockerfile")
 	if fw != nil {
-		if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) || initForceFlag {
-			content := detect.GenerateDockerfile(fw)
-			if content != "" {
-				if err := os.WriteFile(dockerfilePath, []byte(content), 0644); err != nil {
-					return fmt.Errorf("writing Dockerfile: %w", err)
+		// Only generate if project doesn't have its own Dockerfile
+		if _, err := os.Stat(projectDockerfile); os.IsNotExist(err) {
+			if _, err := os.Stat(pierDockerfile); os.IsNotExist(err) || initForceFlag {
+				content := detect.GenerateDockerfile(fw)
+				if content != "" {
+					if err := os.WriteFile(pierDockerfile, []byte(content), 0644); err != nil {
+						return fmt.Errorf("writing Dockerfile: %w", err)
+					}
+					fmt.Printf("  📄 Generated: .pier/Dockerfile\n")
 				}
-				fmt.Printf("  📄 Generated: Dockerfile\n")
+			} else {
+				fmt.Printf("  📄 .pier/Dockerfile already exists %s\n", dim("(use --force to overwrite)"))
 			}
 		} else {
-			fmt.Printf("  📄 Dockerfile already exists %s\n", dim("(use --force to overwrite)"))
+			fmt.Printf("  📄 Project Dockerfile exists %s\n", dim("(pier won't override)"))
 		}
 	}
 
