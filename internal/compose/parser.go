@@ -23,6 +23,7 @@ type ComposeService struct {
 	DependsOn   interface{} `yaml:"depends_on"`
 	Volumes     []string    `yaml:"volumes"`
 	Command     interface{} `yaml:"command"`
+	Entrypoint  interface{} `yaml:"entrypoint"`
 }
 
 // InfraService is a detected infrastructure service from compose
@@ -40,6 +41,9 @@ type AppService struct {
 	Image       string
 	Ports       []string
 	Environment map[string]string
+	Volumes     []string
+	Command     interface{} // entrypoint/command override
+	Entrypoint  interface{}
 }
 
 var knownInfra = map[string]bool{
@@ -86,6 +90,9 @@ func SeparateServices(cf *ComposeFile) (infra []InfraService, apps []AppService)
 				Image:       svc.Image,
 				Ports:       svc.Ports,
 				Environment: parseEnvironment(svc.Environment),
+				Volumes:     svc.Volumes,
+				Command:     svc.Command,
+				Entrypoint:  svc.Entrypoint,
 			}
 			app.Build = parseBuildContext(svc.Build)
 			apps = append(apps, app)

@@ -365,7 +365,54 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 			)
 		}
 
+		// Volumes (resolve relative paths against project dir)
+		for _, v := range app.Volumes {
+			// Only pass bind mounts (contain :), skip named volumes
+			if strings.Contains(v, ":") {
+				parts := strings.SplitN(v, ":", 3)
+				hostPath := parts[0]
+				if !filepath.IsAbs(hostPath) {
+					hostPath = filepath.Join(dir, hostPath)
+				}
+				mount := hostPath + ":" + strings.Join(parts[1:], ":")
+				dockerArgs = append(dockerArgs, "-v", mount)
+			}
+		}
+
+		// Entrypoint override (must be before IMAGE in docker run)
+		if app.Entrypoint != nil {
+			switch ep := app.Entrypoint.(type) {
+			case string:
+				dockerArgs = append(dockerArgs, "--entrypoint", ep)
+			case []interface{}:
+				if len(ep) > 0 {
+					dockerArgs = append(dockerArgs, "--entrypoint", fmt.Sprintf("%v", ep[0]))
+				}
+			}
+		}
+
 		dockerArgs = append(dockerArgs, image)
+
+		// Entrypoint args (remaining elements after first)
+		if app.Entrypoint != nil {
+			if ep, ok := app.Entrypoint.([]interface{}); ok && len(ep) > 1 {
+				for _, e := range ep[1:] {
+					dockerArgs = append(dockerArgs, fmt.Sprintf("%v", e))
+				}
+			}
+		}
+
+		// Command override (goes after IMAGE)
+		if app.Command != nil {
+			switch cmd := app.Command.(type) {
+			case string:
+				dockerArgs = append(dockerArgs, cmd)
+			case []interface{}:
+				for _, c := range cmd {
+					dockerArgs = append(dockerArgs, fmt.Sprintf("%v", c))
+				}
+			}
+		}
 
 		dockerCmd := exec.Command("docker", dockerArgs...)
 		out, err := dockerCmd.CombinedOutput()
