@@ -9,7 +9,7 @@ import (
 )
 
 // Version is set at build time via -ldflags
-var Version = "dev"
+var Version = "0.2.0"
 
 var (
 	// Colors
@@ -23,15 +23,15 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "pier",
-	Short: "🔩 Pier — Local dev domains for Docker containers",
-	Long: `Pier gives every Docker container and bare-metal process a clean
-local domain like myapp.dock — no more port numbers.
+	Short: "🔩 Pier — Dev environment that just works",
+	Long: `Pier — Dev environment that just works.
+Like Laravel Valet, but for everyone.
 
-  pier init              Set up Pier (one-time)
-  pier ls                List all active services
-  pier proxy app 3000    Route app.dock → localhost:3000
-  pier status            Check system health
-  pier dashboard         Open the dashboard`,
+  pier init              Detect framework + generate config
+  pier up                Build, run, and route your project
+  pier down              Stop a project
+  pier ls                List everything running
+  pier proxy app 3000    Route app.dock → localhost:3000`,
 	Version: Version,
 }
 

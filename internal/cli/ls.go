@@ -10,6 +10,7 @@ import (
 
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/docker"
+	"github.com/eshe-huli/pier/internal/infra"
 	"github.com/eshe-huli/pier/internal/proxy"
 )
 
@@ -46,8 +47,11 @@ func runLs(cmd *cobra.Command, args []string) error {
 		warn(fmt.Sprintf("Could not list containers: %s", err))
 	} else {
 		for _, c := range containers {
-			// Skip the pier-traefik container itself
+			// Skip pier-traefik and infra containers (shown separately)
 			if c.Name == "pier-traefik" {
+				continue
+			}
+			if infra.IsInfraContainer(c.Name) {
 				continue
 			}
 
@@ -55,7 +59,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 			entries = append(entries, serviceEntry{
 				Name:   c.Name,
 				Domain: c.Domain,
-				Type:   "docker",
+				Type:   "app",
 				Status: status,
 			})
 		}
@@ -74,6 +78,17 @@ func runLs(cmd *cobra.Command, args []string) error {
 				Status: green("✅ active"),
 			})
 		}
+	}
+
+	// Get shared infrastructure services
+	infraServices := infra.ListRunning()
+	for _, svc := range infraServices {
+		entries = append(entries, serviceEntry{
+			Name:   svc.Container,
+			Domain: "—",
+			Type:   "infra",
+			Status: green("✅ running"),
+		})
 	}
 
 	if len(entries) == 0 {

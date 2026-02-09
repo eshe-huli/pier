@@ -5,30 +5,25 @@ All notable changes to Pier will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - v0.2.0
+## [0.2.0] — 2026-02-09
 
-### Vision
-Pier v0.2 evolves from a routing tool to a **full dev environment helper** — Laravel Valet for everyone.
+### Added
+- `pier up` — Smart project launcher with compose parsing and service sharing
+- `pier run` — Docker run with automatic pier-net joining and env injection
+- `pier down [name]` — Stop specific projects, `--all` stops everything
+- `pier init` — Now detects framework and generates .pier + Dockerfile
+- Shared infrastructure: postgres, redis, mongo, mysql, minio (version-aware, auto-shared)
+- `.pier` config file (auto-generated, optional)
+- Framework detection: NestJS, Express, Next.js, Django, FastAPI, Flask, Go, Rust, Phoenix, Laravel, Rails, Spring Boot, Nuxt, Fastify
+- Dockerfile generation for all supported frameworks
+- Service detection from docker-compose.yml and dependency files
+- Runtime env override (DB_HOST, REDIS_HOST injected automatically)
+- Auto database creation for postgres/mysql projects
 
-### Planned
-- `pier up` — Smart build + run from compose/Dockerfile with service sharing
-- `pier run <image>` — docker run + pier-net + automatic env override
-- `pier init` (enhanced) — Framework detection, Dockerfile generation if missing
-- **Service sharing** — Detect postgres/redis versions, share when match, run new when mismatch
-- **Runtime interception** — Override DB_HOST, REDIS_HOST at launch without touching files
-- **Framework detection** — Auto-detect NestJS, Express, Laravel, Rails, Django, FastAPI, Go, Rust, Phoenix, Spring
-- **Version-aware infra** — pier-postgres-14, pier-postgres-16 can coexist
-- **Zero file changes** — Pier reads compose/Dockerfile/.env, never writes to them
-- **Optional .pier file** — Auto-generated, editable, gitignore-able
-
-### Philosophy
-- Don't replace Docker — intercept it
-- Don't touch dev's files — override at runtime  
-- Don't force team adoption — .pier in .gitignore
-- Share when possible — version match = share
-- Stay invisible — same codebase works without Pier
-
-See [docs/SPEC-v0.2.md](docs/SPEC-v0.2.md) for full specification.
+### Changed
+- `pier ls` now shows projects, proxies, and infra services
+- `pier down` extended from Traefik-only to per-project + --all
+- `pier init` now smart: system init or project init based on context
 
 ## [0.1.0] - 2026-02-07
 
@@ -48,5 +43,5 @@ See [docs/SPEC-v0.2.md](docs/SPEC-v0.2.md) for full specification.
 - Laravel Valet compatibility (coexists on different TLD)
 - Embedded web dashboard at `pier.dock`
 
-[Unreleased]: https://github.com/eshe-huli/pier/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/eshe-huli/pier/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/eshe-huli/pier/releases/tag/v0.1.0

@@ -3,34 +3,161 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/eshe-huli/pier/internal/config"
+	"github.com/eshe-huli/pier/internal/detect"
 	"github.com/eshe-huli/pier/internal/dns"
 	"github.com/eshe-huli/pier/internal/docker"
+	"github.com/eshe-huli/pier/internal/pierfile"
 	"github.com/eshe-huli/pier/internal/proxy"
+)
+
+var (
+	initSystemFlag bool
+	initForceFlag  bool
 )
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize Pier (one-time setup)",
-	Long: `Sets up everything Pier needs:
-  • Docker network 'pier'
-  • Traefik reverse proxy container
-  • DNS configuration check
-  • nginx routing configuration
+	Short: "Initialize Pier or a project",
+	Long: `Smart init: detects context and does the right thing.
 
-Some steps require sudo and will print commands for you to run.`,
+If Pier is not set up yet (no Traefik, no pier network):
+  → System init: Docker network, Traefik, DNS configuration
+
+If Pier is already running AND you're in a project directory:
+  → Project init: detect framework, generate .pier + Dockerfile
+
+Flags:
+  --system    Force system init even inside a project
+  --force     Overwrite existing Dockerfile during project init`,
 	RunE: runInit,
 }
 
 func init() {
+	initCmd.Flags().BoolVar(&initSystemFlag, "system", false, "Force system initialization")
+	initCmd.Flags().BoolVar(&initForceFlag, "force", false, "Overwrite existing Dockerfile")
 	rootCmd.AddCommand(initCmd)
 }
 
+// isProjectDir checks if the current directory looks like a project
+func isProjectDir(dir string) bool {
+	markers := []string{
+		"package.json", "go.mod", "Cargo.toml", "requirements.txt",
+		"Pipfile", "pyproject.toml", "composer.json", "Gemfile",
+		"mix.exs", "pom.xml", "build.gradle", "docker-compose.yml",
+		"docker-compose.yaml", "Dockerfile",
+	}
+	for _, m := range markers {
+		if _, err := os.Stat(filepath.Join(dir, m)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// isPierSystemReady checks if Traefik is running and pier network exists
+func isPierSystemReady() bool {
+	ctx := context.Background()
+	if !docker.IsDockerRunning() {
+		return false
+	}
+	if !proxy.IsTraefikRunning(ctx) {
+		return false
+	}
+	exists, err := docker.NetworkExists(ctx, "pier")
+	return err == nil && exists
+}
+
 func runInit(cmd *cobra.Command, args []string) error {
+	if initSystemFlag {
+		return runSystemInit(cmd, args)
+	}
+
+	// Smart detection
+	dir, _ := os.Getwd()
+	systemReady := isPierSystemReady()
+
+	if systemReady && isProjectDir(dir) {
+		return runProjectInitLogic(dir)
+	}
+
+	// Default to system init
+	return runSystemInit(cmd, args)
+}
+
+func runProjectInitLogic(dir string) error {
+	header := color.New(color.FgCyan, color.Bold)
+	header.Println("\n🔩 Pier — Project Init\n")
+
+	// 1. Detect framework
+	fw, fwErr := detect.DetectFramework(dir)
+	if fwErr == nil {
+		fmt.Printf("  🔍 Detected: %s (%s)\n", bold(initTitleCase(fw.Name)), fw.Language)
+	} else {
+		fmt.Printf("  🔍 No framework detected\n")
+	}
+
+	// 2. Detect services
+	services, _ := detect.DetectServices(dir)
+	if len(services) > 0 {
+		names := make([]string, len(services))
+		for i, s := range services {
+			names[i] = s.String()
+		}
+		fmt.Printf("  📦 Services: %s\n", strings.Join(names, ", "))
+	} else {
+		fmt.Printf("  📦 No services detected\n")
+	}
+
+	// 3. Generate Dockerfile if needed
+	dockerfilePath := filepath.Join(dir, "Dockerfile")
+	if fw != nil {
+		if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) || initForceFlag {
+			content := detect.GenerateDockerfile(fw)
+			if content != "" {
+				if err := os.WriteFile(dockerfilePath, []byte(content), 0644); err != nil {
+					return fmt.Errorf("writing Dockerfile: %w", err)
+				}
+				fmt.Printf("  📄 Generated: Dockerfile\n")
+			}
+		} else {
+			fmt.Printf("  📄 Dockerfile already exists %s\n", dim("(use --force to overwrite)"))
+		}
+	}
+
+	// 4. Generate .pier file
+	projectName := filepath.Base(dir)
+	pf := &pierfile.Pierfile{
+		Name:  projectName,
+		Build: true,
+	}
+	if fw != nil {
+		pf.Port = fw.Port
+	}
+	for _, s := range services {
+		pf.Services = append(pf.Services, s.String())
+	}
+	if err := pierfile.Save(dir, pf); err != nil {
+		return fmt.Errorf("writing .pier: %w", err)
+	}
+	fmt.Printf("  📄 Generated: .pier\n")
+
+	// Summary
+	fmt.Println()
+	color.New(color.FgGreen, color.Bold).Println("  Ready! Run `pier up` to start.")
+	fmt.Println()
+	return nil
+}
+
+func runSystemInit(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	manualSteps := []string{}
 	stepNum := 0
@@ -173,4 +300,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	return nil
+}
+
+func initTitleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
