@@ -30,6 +30,7 @@ type serviceEntry struct {
 	Domain string
 	Type   string
 	Status string
+	Uptime string
 }
 
 func runLs(cmd *cobra.Command, args []string) error {
@@ -61,21 +62,26 @@ func runLs(cmd *cobra.Command, args []string) error {
 				Domain: c.Domain,
 				Type:   "app",
 				Status: status,
+				Uptime: c.Status,
 			})
 		}
 	}
 
-	// Get file-based proxies
+	// Get file-based proxies (check if backend is alive)
 	proxies, err := proxy.ListFileProxies(cfg.TLD)
 	if err != nil {
 		warn(fmt.Sprintf("Could not list proxies: %s", err))
 	} else {
 		for _, p := range proxies {
+			status := green("✅ active")
+			if !proxy.IsProxyBackendAlive(p.Port) {
+				status = yellow("⚠️  stale (port closed)")
+			}
 			entries = append(entries, serviceEntry{
 				Name:   p.Name,
 				Domain: p.Domain,
 				Type:   "proxy",
-				Status: green("✅ active"),
+				Status: status,
 			})
 		}
 	}
@@ -104,15 +110,16 @@ func runLs(cmd *cobra.Command, args []string) error {
 	// Print table
 	fmt.Println()
 	header := color.New(color.Bold)
-	header.Printf("  %-20s %-25s %-10s %s\n", "NAME", "DOMAIN", "TYPE", "STATUS")
-	fmt.Printf("  %s\n", dim(strings.Repeat("─", 70)))
+	header.Printf("  %-20s %-28s %-8s %-16s %s\n", "NAME", "DOMAIN", "TYPE", "STATUS", "UPTIME")
+	fmt.Printf("  %s\n", dim(strings.Repeat("─", 85)))
 
 	for _, e := range entries {
-		fmt.Printf("  %-20s %-25s %-10s %s\n",
+		fmt.Printf("  %-20s %-28s %-8s %-16s %s\n",
 			bold(e.Name),
 			cyan(e.Domain),
 			dim(e.Type),
 			e.Status,
+			dim(e.Uptime),
 		)
 	}
 

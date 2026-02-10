@@ -152,7 +152,10 @@ func runProjectInitLogic(dir string) error {
 		pf.Port = fw.Port
 	}
 	for _, s := range services {
-		pf.Services = append(pf.Services, s.String())
+		pf.Services = append(pf.Services, pierfile.ServiceEntry{
+			Name:    s.Name,
+			Version: s.Version,
+		})
 	}
 	if err := pierfile.Save(dir, pf); err != nil {
 		return fmt.Errorf("writing Pierfile: %w", err)

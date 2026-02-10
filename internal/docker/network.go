@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
@@ -62,7 +63,8 @@ func NetworkExists(ctx context.Context, networkName string) (bool, error) {
 	return false, nil
 }
 
-// IsDockerRunning checks if the Docker daemon is reachable
+// IsDockerRunning checks if the Docker daemon is reachable.
+// Retries briefly to handle Docker/OrbStack still starting up.
 func IsDockerRunning() bool {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -70,6 +72,15 @@ func IsDockerRunning() bool {
 	}
 	defer cli.Close()
 
-	_, err = cli.Ping(context.Background())
-	return err == nil
+	// Retry up to 3 times with 1s delay — handles daemon still starting
+	for i := 0; i < 3; i++ {
+		_, err = cli.Ping(context.Background())
+		if err == nil {
+			return true
+		}
+		if i < 2 {
+			time.Sleep(time.Second)
+		}
+	}
+	return false
 }

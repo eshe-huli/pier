@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/eshe-huli/pier/internal/config"
 	"gopkg.in/yaml.v3"
@@ -116,6 +118,19 @@ func FileProxyExists(name string) bool {
 	filePath := filepath.Join(config.TraefikDynamicDir(), name+".yaml")
 	_, err := os.Stat(filePath)
 	return err == nil
+}
+
+// IsProxyBackendAlive checks if a port is listening on localhost
+func IsProxyBackendAlive(port int) bool {
+	if port == 0 {
+		return true // can't check, assume alive
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func extractPort(data []byte) int {

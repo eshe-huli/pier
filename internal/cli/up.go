@@ -84,7 +84,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Step 2: Detect services
 	var services []string
 	if pf != nil && len(pf.Services) > 0 {
-		services = pf.Services
+		services = pf.ServiceNames()
 	} else {
 		detected, _ := detect.DetectServices(dir)
 		for _, d := range detected {
