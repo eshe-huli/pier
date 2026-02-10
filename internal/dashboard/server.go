@@ -9,8 +9,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/eshe-huli/pier/internal/config"
@@ -39,6 +42,8 @@ func Handler() http.Handler {
 
 	// API endpoints
 	mux.HandleFunc("/api/services", handleServices)
+	mux.HandleFunc("/api/services/start", handleStartService)
+	mux.HandleFunc("/api/services/stop", handleStopService)
 	mux.HandleFunc("/api/health", handleHealth)
 
 	// Static files
@@ -214,6 +219,137 @@ func getLinkedServices(cfg *config.Config) []ServiceInfo {
 	}
 
 	return services
+}
+
+func handleStartService(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, 405)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		http.Error(w, `{"error":"name required"}`, 400)
+		return
+	}
+
+	// Load link metadata
+	metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		http.Error(w, `{"error":"unknown service — only linked services can be launched"}`, 404)
+		return
+	}
+
+	var meta config.LinkMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		http.Error(w, `{"error":"corrupt link metadata"}`, 500)
+		return
+	}
+
+	if meta.Command == "" {
+		http.Error(w, `{"error":"no dev command configured — start it manually"}`, 400)
+		return
+	}
+
+	// Check if already running
+	pidFile := filepath.Join(meta.Dir, ".pier", "dev.pid")
+	if pidData, err := os.ReadFile(pidFile); err == nil {
+		pid, _ := strconv.Atoi(strings.TrimSpace(string(pidData)))
+		if pid > 0 {
+			if proc, err := os.FindProcess(pid); err == nil {
+				if err := proc.Signal(syscall.Signal(0)); err == nil {
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"status": "already_running", "pid": pid,
+					})
+					return
+				}
+			}
+		}
+	}
+
+	// Start the dev server
+	pierDir := filepath.Join(meta.Dir, ".pier")
+	_ = os.MkdirAll(pierDir, 0755)
+	logFile := filepath.Join(pierDir, "dev.log")
+
+	log, err := os.Create(logFile)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"cannot create log: %s"}`, err), 500)
+		return
+	}
+
+	parts := strings.Fields(meta.Command)
+	c := exec.Command(parts[0], parts[1:]...)
+	c.Dir = meta.Dir
+	c.Stdout = log
+	c.Stderr = log
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := c.Start(); err != nil {
+		log.Close()
+		http.Error(w, fmt.Sprintf(`{"error":"failed to start: %s"}`, err), 500)
+		return
+	}
+	log.Close()
+
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(c.Process.Pid)), 0644)
+	go func() { _ = c.Wait() }()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "started", "pid": c.Process.Pid, "command": meta.Command,
+	})
+}
+
+func handleStopService(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, 405)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		http.Error(w, `{"error":"name required"}`, 400)
+		return
+	}
+
+	metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		http.Error(w, `{"error":"unknown service"}`, 404)
+		return
+	}
+
+	var meta config.LinkMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		http.Error(w, `{"error":"corrupt link metadata"}`, 500)
+		return
+	}
+
+	pidFile := filepath.Join(meta.Dir, ".pier", "dev.pid")
+	pidData, err := os.ReadFile(pidFile)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"status": "not_running"})
+		return
+	}
+
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if pid > 0 {
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
+	}
+	_ = os.Remove(pidFile)
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
 }
 
 func extractDomain(rule string) string {

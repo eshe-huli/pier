@@ -82,6 +82,14 @@ function renderServices(services) {
         const isUp = svc.status === 'enabled' || svc.status === 'running';
         const statusBadge = isUp ? 'running' : 'stopped';
         const statusLabel = isUp ? 'Running' : 'Stopped';
+        const isLinked = svc.type === 'linked';
+
+        let actionBtn = '';
+        if (isLinked && !isUp) {
+            actionBtn = `<button class="btn-launch" onclick="launchService('${esc(svc.name)}')" title="Launch">▶ Launch</button>`;
+        } else if (isLinked && isUp) {
+            actionBtn = `<button class="btn-stop" onclick="stopService('${esc(svc.name)}')" title="Stop">■ Stop</button>`;
+        }
 
         return `
             <div class="service-card">
@@ -95,6 +103,7 @@ function renderServices(services) {
                 <div class="service-right">
                     <span class="badge ${svc.type}">${esc(svc.type)}</span>
                     <span class="badge ${statusBadge}">${statusLabel}</span>
+                    ${actionBtn}
                     <a class="btn-open" href="${esc(svc.url)}" target="_blank">
                         Open ↗
                     </a>
@@ -118,6 +127,51 @@ function esc(str) {
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
+}
+
+async function launchService(name) {
+    try {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = '⏳ Starting...';
+        
+        const resp = await fetch('/api/services/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        const data = await resp.json();
+        
+        if (!resp.ok) {
+            alert(data.error || 'Failed to start');
+            btn.disabled = false;
+            btn.textContent = '▶ Launch';
+            return;
+        }
+
+        // Refresh after a brief delay to let the server boot
+        setTimeout(loadServices, 2000);
+    } catch (err) {
+        alert('Failed to start service: ' + err.message);
+    }
+}
+
+async function stopService(name) {
+    try {
+        const resp = await fetch('/api/services/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json();
+            alert(data.error || 'Failed to stop');
+            return;
+        }
+        setTimeout(loadServices, 500);
+    } catch (err) {
+        alert('Failed to stop service: ' + err.message);
+    }
 }
 
 // Search filter

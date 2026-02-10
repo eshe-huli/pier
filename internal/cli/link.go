@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -118,6 +119,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 
 	if devCmd == "" {
 		// No dev command — just proxy, user starts their own server
+		saveLinkMeta(name, dir, port, "")
 		fmt.Println()
 		info(fmt.Sprintf("Proxy created. Start your dev server on port %d.", port))
 		fmt.Println()
@@ -156,6 +158,9 @@ func runLink(cmd *cobra.Command, args []string) error {
 
 	// Save PID
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(c.Process.Pid)), 0644)
+
+	// Save link metadata for dashboard relaunch
+	saveLinkMeta(name, dir, port, devCmd)
 
 	// Don't wait — detach
 	go func() { _ = c.Wait() }()
@@ -198,6 +203,14 @@ func detectDevCommand(fw *detect.Framework, port int) string {
 	default:
 		return ""
 	}
+}
+
+func saveLinkMeta(name, dir string, port int, command string) {
+	linksDir := config.LinksDir()
+	_ = os.MkdirAll(linksDir, 0755)
+	meta := config.LinkMeta{Name: name, Dir: dir, Port: port, Command: command}
+	data, _ := json.Marshal(meta)
+	_ = os.WriteFile(filepath.Join(linksDir, name+".json"), data, 0644)
 }
 
 func killExistingDev(pidFile string) {

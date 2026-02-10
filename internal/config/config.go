@@ -59,6 +59,19 @@ func TraefikConfigPath() string {
 	return filepath.Join(TraefikDir(), "traefik.yaml")
 }
 
+// LinksDir returns the directory for linked service metadata
+func LinksDir() string {
+	return filepath.Join(PierDir(), "links")
+}
+
+// LinkMeta describes a linked dev service
+type LinkMeta struct {
+	Name    string `json:"name"`
+	Dir     string `json:"dir"`
+	Port    int    `json:"port"`
+	Command string `json:"command"`
+}
+
 // NginxDir returns the nginx config directory
 func NginxDir() string {
 	return filepath.Join(PierDir(), "nginx")
