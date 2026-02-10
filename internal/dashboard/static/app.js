@@ -1,97 +1,145 @@
-// Pier Dashboard — Fetches routes from Traefik API
+// Pier Dashboard — Dev Hub
 
-const TRAEFIK_API = 'http://127.0.0.1:8881';
+let allServices = [];
 
 async function loadServices() {
-    const list = document.getElementById('services-list');
+    const grid = document.getElementById('services-grid');
     const empty = document.getElementById('empty-state');
-    const statusEl = document.getElementById('status-traefik');
+    const pill = document.getElementById('status-pill');
+    const statusText = document.getElementById('status-text');
 
     try {
-        const resp = await fetch(`${TRAEFIK_API}/api/http/routers`);
+        const resp = await fetch('/api/services');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        
-        const routers = await resp.json();
-        statusEl.textContent = `✅ Traefik connected (${routers.length} routes)`;
-        statusEl.className = 'status-item ok';
 
-        // Filter out internal Traefik routes
-        const services = routers.filter(r => 
-            !r.name.includes('api@internal') && 
-            !r.name.includes('dashboard@internal') &&
-            !r.name.includes('acme')
-        );
+        const data = await resp.json();
+        allServices = data.services || [];
 
-        if (services.length === 0) {
-            list.style.display = 'none';
-            empty.style.display = 'block';
-            return;
-        }
+        // Update status
+        pill.className = 'status-pill ok';
+        statusText.textContent = `${allServices.length} services`;
 
-        list.style.display = 'flex';
-        empty.style.display = 'none';
-        list.innerHTML = services.map(svc => renderService(svc)).join('');
+        // Update stats
+        const running = allServices.filter(s => s.status === 'enabled' || s.status === 'running').length;
+        const docker = allServices.filter(s => s.type === 'docker').length;
+        const linked = allServices.filter(s => s.type === 'linked' || s.type === 'proxy').length;
+
+        document.getElementById('stat-total').textContent = allServices.length;
+        document.getElementById('stat-running').textContent = running;
+        document.getElementById('stat-docker').textContent = docker;
+        document.getElementById('stat-linked').textContent = linked;
+
+        // Update last refresh
+        document.getElementById('last-refresh').textContent = 
+            `Updated ${new Date().toLocaleTimeString()}`;
+
+        renderServices(allServices);
 
     } catch (err) {
-        statusEl.textContent = '❌ Cannot reach Traefik API';
-        statusEl.className = 'status-item error';
-        list.innerHTML = `<div class="loading">Cannot connect to Traefik at ${TRAEFIK_API}<br><small>Make sure Pier is running: <code>pier status</code></small></div>`;
+        pill.className = 'status-pill error';
+        statusText.textContent = 'Disconnected';
+        grid.innerHTML = `
+            <div class="loading-state">
+                <p>Cannot connect to Pier</p>
+                <p style="font-size: 12px; opacity: 0.5;">Make sure pier dashboard is running</p>
+            </div>
+        `;
     }
 }
 
-function renderService(router) {
-    const domain = extractDomain(router.rule);
-    const provider = router.provider || 'unknown';
-    const type = provider.includes('docker') ? 'docker' : 
-                 provider.includes('file') ? 'proxy' : provider;
-    const status = router.status === 'enabled' ? 'enabled' : 'disabled';
-    const statusIcon = status === 'enabled' ? '✅' : '❌';
-    const name = router.name.split('@')[0];
+function renderServices(services) {
+    const grid = document.getElementById('services-grid');
+    const empty = document.getElementById('empty-state');
 
-    return `
-        <div class="service-card">
-            <div class="service-info">
-                <span class="service-name">${escapeHtml(name)}</span>
-                <a class="service-domain" href="http://${escapeHtml(domain)}" target="_blank">
-                    ${escapeHtml(domain)}
-                </a>
-                <span class="service-meta">${escapeHtml(type)} • ${escapeHtml(router.service || '')}</span>
+    // Apply search filter
+    const query = document.getElementById('search').value.toLowerCase();
+    const filtered = query 
+        ? services.filter(s => 
+            s.name.toLowerCase().includes(query) || 
+            s.domain.toLowerCase().includes(query))
+        : services;
+
+    if (filtered.length === 0 && services.length === 0) {
+        grid.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+    }
+
+    grid.style.display = 'flex';
+    empty.style.display = 'none';
+
+    if (filtered.length === 0) {
+        grid.innerHTML = `
+            <div class="loading-state">
+                <p>No services match "${esc(query)}"</p>
             </div>
-            <div class="service-actions">
-                <span class="service-status ${status}">${statusIcon} ${status}</span>
-                <button class="btn-copy" onclick="copyDomain('${escapeHtml(domain)}')" title="Copy domain">
-                    📋
-                </button>
+        `;
+        return;
+    }
+
+    grid.innerHTML = filtered.map(svc => {
+        const icon = getIcon(svc.type);
+        const isUp = svc.status === 'enabled' || svc.status === 'running';
+        const statusBadge = isUp ? 'running' : 'stopped';
+        const statusLabel = isUp ? 'Running' : 'Stopped';
+
+        return `
+            <div class="service-card">
+                <div class="service-left">
+                    <div class="service-icon ${svc.type}">${icon}</div>
+                    <div class="service-info">
+                        <div class="service-name">${esc(svc.name)}</div>
+                        <a class="service-domain" href="${esc(svc.url)}" target="_blank">${esc(svc.domain)}</a>
+                    </div>
+                </div>
+                <div class="service-right">
+                    <span class="badge ${svc.type}">${esc(svc.type)}</span>
+                    <span class="badge ${statusBadge}">${statusLabel}</span>
+                    <a class="btn-open" href="${esc(svc.url)}" target="_blank">
+                        Open ↗
+                    </a>
+                </div>
             </div>
-        </div>
-    `;
+        `;
+    }).join('');
 }
 
-function extractDomain(rule) {
-    if (!rule) return 'unknown';
-    const match = rule.match(/Host\(`([^`]+)`\)/);
-    return match ? match[1] : rule;
+function getIcon(type) {
+    switch (type) {
+        case 'docker': return '🐳';
+        case 'linked': return '🔗';
+        case 'proxy':  return '🔀';
+        default:       return '📦';
+    }
 }
 
-function copyDomain(domain) {
-    navigator.clipboard.writeText(domain).then(() => {
-        // Brief visual feedback
-        const btn = event.target;
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 1000);
-    });
-}
-
-function escapeHtml(str) {
+function esc(str) {
     if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
 }
 
-// Load on page load
+// Search filter
+document.getElementById('search').addEventListener('input', () => {
+    renderServices(allServices);
+});
+
+// Keyboard shortcut: / to focus search
+document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault();
+        document.getElementById('search').focus();
+    }
+    if (e.key === 'Escape') {
+        document.getElementById('search').value = '';
+        document.getElementById('search').blur();
+        renderServices(allServices);
+    }
+});
+
+// Initial load
 loadServices();
 
-// Auto-refresh every 10 seconds
-setInterval(loadServices, 10000);
+// Auto-refresh every 5 seconds
+setInterval(loadServices, 5000);

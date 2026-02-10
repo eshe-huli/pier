@@ -3,43 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pier — Local Dev Domains</title>
+    <title>Pier — Dev Hub</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚓</text></svg>">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🔩 Pier</h1>
-            <span class="version" id="version">v0.1.0</span>
+    <div class="app">
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">⚓</div>
+                <div class="brand">
+                    <h1>Pier</h1>
+                    <span class="tagline">Local Dev Hub</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="status-pill" id="status-pill">
+                    <span class="pulse"></span>
+                    <span id="status-text">Connecting...</span>
+                </div>
+                <span class="version" id="version">v0.2.0</span>
+            </div>
         </header>
 
-        <div class="status-bar" id="status-bar">
-            <span class="status-item" id="status-traefik">⏳ Checking...</span>
+        <div class="stats-bar" id="stats-bar">
+            <div class="stat">
+                <span class="stat-value" id="stat-total">-</span>
+                <span class="stat-label">Services</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="stat-running">-</span>
+                <span class="stat-label">Running</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="stat-docker">-</span>
+                <span class="stat-label">Docker</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="stat-linked">-</span>
+                <span class="stat-label">Linked</span>
+            </div>
         </div>
 
-        <main>
-            <div class="section-header">
-                <h2>Active Services</h2>
-                <button class="btn-refresh" onclick="loadServices()">🔄 Refresh</button>
+        <main class="main">
+            <div class="toolbar">
+                <div class="search-box">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" id="search" placeholder="Filter services..." />
+                </div>
+                <div class="toolbar-actions">
+                    <button class="btn btn-ghost" onclick="loadServices()" title="Refresh">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    </button>
+                </div>
             </div>
 
-            <div id="services-list" class="services-list">
-                <div class="loading">Loading services...</div>
+            <div id="services-grid" class="services-grid">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Discovering services...</p>
+                </div>
             </div>
 
             <div id="empty-state" class="empty-state" style="display: none;">
-                <p>No services found.</p>
-                <p class="hint">Add a Docker container to the <code>pier</code> network, or run:</p>
-                <code class="command">pier proxy &lt;name&gt; &lt;port&gt;</code>
+                <div class="empty-icon">🏗️</div>
+                <h3>No services running</h3>
+                <p>Start a project to see it here</p>
+                <div class="empty-commands">
+                    <code>pier up</code>
+                    <span>Start a Pierfile project</span>
+                    <code>pier link</code>
+                    <span>Link a dev server</span>
+                    <code>pier proxy name port</code>
+                    <span>Proxy any local port</span>
+                </div>
             </div>
         </main>
 
-        <footer>
-            <div class="footer-links">
-                <a href="http://127.0.0.1:8881" target="_blank">📊 Traefik Dashboard</a>
-                <span class="separator">•</span>
-                <a href="https://github.com/eshe-huli/pier" target="_blank">GitHub</a>
-            </div>
+        <footer class="footer">
+            <span>⚓ Pier v0.2.0</span>
+            <span class="separator">·</span>
+            <a href="http://traefik.dock" target="_blank">Traefik</a>
+            <span class="separator">·</span>
+            <a href="https://github.com/eshe-huli/pier" target="_blank">GitHub</a>
+            <span class="separator">·</span>
+            <span id="last-refresh">—</span>
         </footer>
     </div>
 
