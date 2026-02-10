@@ -16,6 +16,7 @@ import (
 	"github.com/eshe-huli/pier/internal/detect"
 	"github.com/eshe-huli/pier/internal/pierfile"
 	"github.com/eshe-huli/pier/internal/proxy"
+	"github.com/eshe-huli/pier/internal/registry"
 )
 
 var linkPort int
@@ -85,12 +86,14 @@ func runLink(cmd *cobra.Command, args []string) error {
 	}
 
 	// Auto-detect framework if no command
+	fwName := ""
 	if devCmd == "" {
 		fw, fwErr := detect.DetectFramework(dir)
 		if fwErr != nil && port == 0 {
 			return fmt.Errorf("could not detect framework and no port specified. Use --port or add a Pierfile")
 		}
 		if fw != nil {
+			fwName = fw.Name
 			if port == 0 {
 				port = fw.Port
 			}
@@ -119,7 +122,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 
 	if devCmd == "" {
 		// No dev command — just proxy, user starts their own server
-		saveLinkMeta(name, dir, port, "")
+		saveLinkMeta(name, dir, port, "", fwName)
 		fmt.Println()
 		info(fmt.Sprintf("Proxy created. Start your dev server on port %d.", port))
 		fmt.Println()
@@ -160,7 +163,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(c.Process.Pid)), 0644)
 
 	// Save link metadata for dashboard relaunch
-	saveLinkMeta(name, dir, port, devCmd)
+	saveLinkMeta(name, dir, port, devCmd, fwName)
 
 	// Don't wait — detach
 	go func() { _ = c.Wait() }()
@@ -205,12 +208,23 @@ func detectDevCommand(fw *detect.Framework, port int) string {
 	}
 }
 
-func saveLinkMeta(name, dir string, port int, command string) {
+func saveLinkMeta(name, dir string, port int, command string, framework string) {
+	// Save to legacy links dir
 	linksDir := config.LinksDir()
 	_ = os.MkdirAll(linksDir, 0755)
 	meta := config.LinkMeta{Name: name, Dir: dir, Port: port, Command: command}
 	data, _ := json.Marshal(meta)
 	_ = os.WriteFile(filepath.Join(linksDir, name+".json"), data, 0644)
+
+	// Register in project registry
+	_ = registry.Register(registry.Project{
+		Name:      name,
+		Dir:       dir,
+		Port:      port,
+		Command:   command,
+		Type:      "link",
+		Framework: framework,
+	})
 }
 
 func killExistingDev(pidFile string) {

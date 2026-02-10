@@ -426,6 +426,26 @@ body {
 
 .separator { opacity: 0.3; }
 
+.service-stopped { opacity: 0.6; }
+.service-stopped:hover { opacity: 1; }
+
+.service-dir {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+    margin-top: 2px;
+}
+
+.badge.framework {
+    background: rgba(139, 92, 246, 0.1);
+    color: #7c3aed;
+    border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
 /* Launch / Stop buttons */
 .btn-launch {
     padding: 4px 12px;

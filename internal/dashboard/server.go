@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/eshe-huli/pier/internal/config"
+	"github.com/eshe-huli/pier/internal/registry"
 )
 
 //go:embed static/*
@@ -26,14 +27,17 @@ const DashboardPort = 19191
 
 // ServiceInfo represents a running service for the dashboard
 type ServiceInfo struct {
-	Name     string `json:"name"`
-	Domain   string `json:"domain"`
-	URL      string `json:"url"`
-	Type     string `json:"type"` // docker, linked, proxy
-	Status   string `json:"status"`
-	Uptime   string `json:"uptime,omitempty"`
-	Port     string `json:"port,omitempty"`
-	Provider string `json:"provider,omitempty"`
+	Name      string `json:"name"`
+	Domain    string `json:"domain"`
+	URL       string `json:"url"`
+	Type      string `json:"type"` // docker, linked, proxy
+	Status    string `json:"status"`
+	Uptime    string `json:"uptime,omitempty"`
+	Port      string `json:"port,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Dir       string `json:"dir,omitempty"`
+	Framework string `json:"framework,omitempty"`
+	LastUsed  string `json:"lastUsed,omitempty"`
 }
 
 // Handler returns an http.Handler for the full dashboard (static + API)
@@ -44,6 +48,7 @@ func Handler() http.Handler {
 	mux.HandleFunc("/api/services", handleServices)
 	mux.HandleFunc("/api/services/start", handleStartService)
 	mux.HandleFunc("/api/services/stop", handleStopService)
+	mux.HandleFunc("/api/projects", handleProjects)
 	mux.HandleFunc("/api/health", handleHealth)
 
 	// Static files
@@ -101,6 +106,37 @@ func handleServices(w http.ResponseWriter, r *http.Request) {
 	// 2. Get linked services (dev servers with PID files)
 	linkedServices := getLinkedServices(cfg)
 	services = append(services, linkedServices...)
+
+	// Merge registry projects that aren't already in services (stopped projects)
+	projects, _ := registry.Load()
+	activeNames := map[string]bool{}
+	for i, svc := range services {
+		activeNames[svc.Name] = true
+		// Enrich with registry metadata
+		for _, p := range projects {
+			if p.Name == svc.Name {
+				services[i].Dir = p.Dir
+				services[i].Framework = p.Framework
+				services[i].LastUsed = p.LastUsed
+				break
+			}
+		}
+	}
+	for _, p := range projects {
+		if !activeNames[p.Name] {
+			domain := fmt.Sprintf("%s.%s", p.Name, cfg.TLD)
+			services = append(services, ServiceInfo{
+				Name:      p.Name,
+				Domain:    domain,
+				URL:       fmt.Sprintf("http://%s", domain),
+				Type:      p.Type,
+				Status:    "stopped",
+				Dir:       p.Dir,
+				Framework: p.Framework,
+				LastUsed:  p.LastUsed,
+			})
+		}
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"services": services,
@@ -221,6 +257,34 @@ func getLinkedServices(cfg *config.Config) []ServiceInfo {
 	return services
 }
 
+func handleProjects(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	switch r.Method {
+	case http.MethodGet:
+		projects, err := registry.Load()
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"projects": projects})
+
+	case http.MethodDelete:
+		var req struct{ Name string `json:"name"` }
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.Name == "" {
+			http.Error(w, `{"error":"name required"}`, 400)
+			return
+		}
+		_ = registry.Remove(req.Name)
+		json.NewEncoder(w).Encode(map[string]string{"status": "removed"})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, 405)
+	}
+}
+
 func handleStartService(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -238,18 +302,28 @@ func handleStartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load link metadata
-	metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		http.Error(w, `{"error":"unknown service — only linked services can be launched"}`, 404)
-		return
-	}
-
+	// Try registry first, then legacy links dir
 	var meta config.LinkMeta
-	if err := json.Unmarshal(data, &meta); err != nil {
-		http.Error(w, `{"error":"corrupt link metadata"}`, 500)
-		return
+	projects, _ := registry.Load()
+	found := false
+	for _, p := range projects {
+		if p.Name == req.Name {
+			meta = config.LinkMeta{Name: p.Name, Dir: p.Dir, Port: p.Port, Command: p.Command}
+			found = true
+			break
+		}
+	}
+	if !found {
+		metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			http.Error(w, `{"error":"unknown service — register it first with pier link or pier up"}`, 404)
+			return
+		}
+		if err := json.Unmarshal(data, &meta); err != nil {
+			http.Error(w, `{"error":"corrupt link metadata"}`, 500)
+			return
+		}
 	}
 
 	if meta.Command == "" {
@@ -323,20 +397,31 @@ func handleStopService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		http.Error(w, `{"error":"unknown service"}`, 404)
-		return
+	// Find project dir from registry or legacy links
+	var projectDir string
+	projects, _ := registry.Load()
+	for _, p := range projects {
+		if p.Name == req.Name {
+			projectDir = p.Dir
+			break
+		}
+	}
+	if projectDir == "" {
+		metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			http.Error(w, `{"error":"unknown service"}`, 404)
+			return
+		}
+		var meta config.LinkMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			http.Error(w, `{"error":"corrupt link metadata"}`, 500)
+			return
+		}
+		projectDir = meta.Dir
 	}
 
-	var meta config.LinkMeta
-	if err := json.Unmarshal(data, &meta); err != nil {
-		http.Error(w, `{"error":"corrupt link metadata"}`, 500)
-		return
-	}
-
-	pidFile := filepath.Join(meta.Dir, ".pier", "dev.pid")
+	pidFile := filepath.Join(projectDir, ".pier", "dev.pid")
 	pidData, err := os.ReadFile(pidFile)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"status": "not_running"})

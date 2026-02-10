@@ -17,6 +17,7 @@ import (
 	"github.com/eshe-huli/pier/internal/infra"
 	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/pierfile"
+	"github.com/eshe-huli/pier/internal/registry"
 	"github.com/eshe-huli/pier/internal/runtime"
 )
 
@@ -471,6 +472,8 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 		fmt.Printf("  Database: %s (auto-created)\n", projectName)
 		fmt.Println()
 	}
+	// Register in project registry
+	_ = registry.Register(registry.Project{Name: projectName, Dir: dir, Type: "docker"})
 
 	return nil
 }
@@ -581,6 +584,9 @@ func runUpBuild(dir, projectName string, cfg *config.Config, sharedServices []in
 		fmt.Printf("  Database: %s (auto-created)\n", projectName)
 		fmt.Println()
 	}
+	// Register in project registry
+	_ = registry.Register(registry.Project{Name: projectName, Dir: dir, Type: "docker"})
+
 	return nil
 }
 

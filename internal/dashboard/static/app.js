@@ -91,22 +91,25 @@ function renderServices(services) {
             actionBtn = `<button class="btn-stop" onclick="stopService('${esc(svc.name)}')" title="Stop">■ Stop</button>`;
         }
 
+        const dirLabel = svc.dir ? `<div class="service-dir" title="${esc(svc.dir)}">${esc(shortenPath(svc.dir))}</div>` : '';
+        const fwBadge = svc.framework ? `<span class="badge framework">${esc(svc.framework)}</span>` : '';
+
         return `
-            <div class="service-card">
+            <div class="service-card${!isUp ? ' service-stopped' : ''}">
                 <div class="service-left">
                     <div class="service-icon ${svc.type}">${icon}</div>
                     <div class="service-info">
                         <div class="service-name">${esc(svc.name)}</div>
                         <a class="service-domain" href="${esc(svc.url)}" target="_blank">${esc(svc.domain)}</a>
+                        ${dirLabel}
                     </div>
                 </div>
                 <div class="service-right">
+                    ${fwBadge}
                     <span class="badge ${svc.type}">${esc(svc.type)}</span>
                     <span class="badge ${statusBadge}">${statusLabel}</span>
                     ${actionBtn}
-                    <a class="btn-open" href="${esc(svc.url)}" target="_blank">
-                        Open ↗
-                    </a>
+                    ${isUp ? `<a class="btn-open" href="${esc(svc.url)}" target="_blank">Open ↗</a>` : ''}
                 </div>
             </div>
         `;
@@ -120,6 +123,11 @@ function getIcon(type) {
         case 'proxy':  return '🔀';
         default:       return '📦';
     }
+}
+
+function shortenPath(p) {
+    if (!p) return '';
+    return p.replace(/^\/Users\/[^/]+/, '~');
 }
 
 function esc(str) {

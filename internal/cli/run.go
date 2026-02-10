@@ -11,6 +11,7 @@ import (
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/infra"
 	"github.com/eshe-huli/pier/internal/proxy"
+	"github.com/eshe-huli/pier/internal/registry"
 	"github.com/eshe-huli/pier/internal/runtime"
 )
 
@@ -139,6 +140,15 @@ func runRunCmd(cmd *cobra.Command, args []string) error {
 			success(fmt.Sprintf("Routed → %s", cyan(domain)))
 		}
 	}
+
+	// Register in project registry
+	dir, _ := os.Getwd()
+	_ = registry.Register(registry.Project{
+		Name: name,
+		Dir:  dir,
+		Port: runPort,
+		Type: "run",
+	})
 
 	fmt.Println()
 	return nil
