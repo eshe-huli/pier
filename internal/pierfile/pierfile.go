@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const FileName = ".pier"
+const FileName = "app.pier"
 const LegacyFileName = "Pierfile"
 
 // ServiceEntry supports both simple string ("postgres:16") and map form:
@@ -109,21 +109,31 @@ func FormatService(name, version string) string {
 }
 
 func Exists(dir string) bool {
+	return findPierFile(dir) != ""
+}
+
+// findPierFile locates the config: app.pier, any *.pier, or legacy Pierfile
+func findPierFile(dir string) string {
+	// Primary: app.pier
 	if _, err := os.Stat(filepath.Join(dir, FileName)); err == nil {
-		return true
+		return filepath.Join(dir, FileName)
 	}
-	// Check legacy Pierfile
+	// Any *.pier file
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.pier"))
+	if len(matches) > 0 {
+		return matches[0]
+	}
+	// Legacy: Pierfile
 	if _, err := os.Stat(filepath.Join(dir, LegacyFileName)); err == nil {
-		return true
+		return filepath.Join(dir, LegacyFileName)
 	}
-	return false
+	return ""
 }
 
 func Load(dir string) (*Pierfile, error) {
-	path := filepath.Join(dir, FileName)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		// Fallback to legacy Pierfile
-		path = filepath.Join(dir, LegacyFileName)
+	path := findPierFile(dir)
+	if path == "" {
+		return nil, fmt.Errorf("no .pier config found (expected app.pier or *.pier)")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

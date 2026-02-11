@@ -185,7 +185,7 @@ func createContainerProxy(name string, port int, tld string) error {
 
 // loadPierFileServices reads services from .pier file in current directory
 func loadPierFileServices() []string {
-	data, err := os.ReadFile(".pier")
+	data, err := os.ReadFile("app.pier")
 	if err != nil {
 		// Fallback to legacy Pierfile
 		data, err = os.ReadFile("Pierfile")

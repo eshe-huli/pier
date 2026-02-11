@@ -159,7 +159,7 @@ func runProjectInitLogic(dir string) error {
 	if err := pierfile.Save(dir, pf); err != nil {
 		return fmt.Errorf("writing .pier: %w", err)
 	}
-	fmt.Printf("  📄 Generated: .pier\n")
+	fmt.Printf("  📄 Generated: app.pier\n")
 
 	// Ensure .pier/ is in .gitignore
 	if err := gitignore.EnsurePierIgnored(dir); err != nil {
