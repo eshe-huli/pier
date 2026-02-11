@@ -76,9 +76,9 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	step(1, fmt.Sprintf("Project: %s", cyan(projectName)))
 
-	// Check for docker-compose project
+	// Check for docker-compose project (Pierfile takes priority)
 	cf, composeErr := compose.Parse(dir)
-	if composeErr == nil {
+	if composeErr == nil && pf == nil {
 		return runUpCompose(dir, projectName, cf, cfg)
 	}
 
