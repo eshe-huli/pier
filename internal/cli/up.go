@@ -67,7 +67,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if pierfile.Exists(dir) {
 		pf, err = pierfile.Load(dir)
 		if err != nil {
-			return fmt.Errorf("loading Pierfile: %w", err)
+			return fmt.Errorf("loading .pier config: %w", err)
 		}
 		if pf.Name != "" {
 			projectName = pf.Name
@@ -135,7 +135,14 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 4: Build the app
+	// Port is ALWAYS auto-detected from framework — never from config
+	// Users don't care about ports. Pier handles everything.
 	port := 0
+	fw, _ := detect.DetectFramework(dir)
+	if fw != nil {
+		port = fw.Port
+	}
+	// Pierfile port is still respected as override if explicitly set
 	if pf != nil && pf.Port > 0 {
 		port = pf.Port
 	}
@@ -144,9 +151,8 @@ func runUp(cmd *cobra.Command, args []string) error {
 	dockerfile := filepath.Join(dir, "Dockerfile")
 	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
 		// No Dockerfile — detect framework and generate one
-		fw, fwErr := detect.DetectFramework(dir)
-		if fwErr != nil {
-			return fmt.Errorf("no Dockerfile found and could not detect framework: %w", fwErr)
+		if fw == nil {
+			return fmt.Errorf("no Dockerfile found and could not detect framework")
 		}
 		if port == 0 {
 			port = fw.Port

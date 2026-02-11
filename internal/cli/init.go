@@ -142,15 +142,14 @@ func runProjectInitLogic(dir string) error {
 		}
 	}
 
-	// 4. Generate .pier file
+	// 4. Generate .pier file (no port — pier handles routing automatically)
 	projectName := filepath.Base(dir)
 	pf := &pierfile.Pierfile{
 		Name:  projectName,
 		Build: true,
 	}
-	if fw != nil {
-		pf.Port = fw.Port
-	}
+	// Port is NOT stored in config — pier detects it from framework
+	// and injects PORT env automatically. Users never touch ports.
 	for _, s := range services {
 		pf.Services = append(pf.Services, pierfile.ServiceEntry{
 			Name:    s.Name,
@@ -158,9 +157,9 @@ func runProjectInitLogic(dir string) error {
 		})
 	}
 	if err := pierfile.Save(dir, pf); err != nil {
-		return fmt.Errorf("writing Pierfile: %w", err)
+		return fmt.Errorf("writing .pier: %w", err)
 	}
-	fmt.Printf("  📄 Generated: Pierfile\n")
+	fmt.Printf("  📄 Generated: .pier\n")
 
 	// Ensure .pier/ is in .gitignore
 	if err := gitignore.EnsurePierIgnored(dir); err != nil {

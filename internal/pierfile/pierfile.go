@@ -10,7 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const FileName = "Pierfile"
+const FileName = ".pier"
+const LegacyFileName = "Pierfile"
 
 // ServiceEntry supports both simple string ("postgres:16") and map form:
 //
@@ -108,12 +109,23 @@ func FormatService(name, version string) string {
 }
 
 func Exists(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, FileName))
-	return err == nil
+	if _, err := os.Stat(filepath.Join(dir, FileName)); err == nil {
+		return true
+	}
+	// Check legacy Pierfile
+	if _, err := os.Stat(filepath.Join(dir, LegacyFileName)); err == nil {
+		return true
+	}
+	return false
 }
 
 func Load(dir string) (*Pierfile, error) {
-	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	path := filepath.Join(dir, FileName)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Fallback to legacy Pierfile
+		path = filepath.Join(dir, LegacyFileName)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -137,5 +149,6 @@ func Save(dir string, pf *Pierfile) error {
 	if err != nil {
 		return err
 	}
+	// Always write to .pier (new format)
 	return os.WriteFile(filepath.Join(dir, FileName), data, 0644)
 }
