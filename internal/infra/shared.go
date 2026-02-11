@@ -248,6 +248,7 @@ func GetConnectionEnv(name, version string) map[string]string {
 		env["DATABASE_HOST"] = cname
 		env["DATABASE_PORT"] = fmt.Sprintf("%d", def.Port)
 		env["DATABASE_USER"] = "pier"
+		env["DATABASE_USERNAME"] = "pier"
 		env["DATABASE_PASSWORD"] = "pier"
 		env["DATABASE_NAME"] = "" // set by caller with project name
 		env["DATABASE_SYNCHRONIZE"] = "true"
