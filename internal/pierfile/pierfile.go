@@ -118,10 +118,12 @@ func findPierFile(dir string) string {
 	if _, err := os.Stat(filepath.Join(dir, FileName)); err == nil {
 		return filepath.Join(dir, FileName)
 	}
-	// Any *.pier file
+	// Any *.pier file (skip directories)
 	matches, _ := filepath.Glob(filepath.Join(dir, "*.pier"))
-	if len(matches) > 0 {
-		return matches[0]
+	for _, m := range matches {
+		if info, err := os.Stat(m); err == nil && !info.IsDir() {
+			return m
+		}
 	}
 	// Legacy: Pierfile
 	if _, err := os.Stat(filepath.Join(dir, LegacyFileName)); err == nil {
