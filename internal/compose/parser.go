@@ -186,3 +186,16 @@ func resolveEnvVar(val string) string {
 	}
 	return val
 }
+
+// ParseFirstPort extracts the container port from a docker-compose ports spec.
+func ParseFirstPort(ports []string) int {
+	if len(ports) == 0 {
+		return 0
+	}
+	p := ports[0]
+	p = strings.Split(p, "/")[0] // strip /tcp, /udp
+	parts := strings.Split(p, ":")
+	var port int
+	fmt.Sscanf(parts[len(parts)-1], "%d", &port)
+	return port
+}

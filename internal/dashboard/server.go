@@ -370,10 +370,14 @@ func handleStartService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf(`{"error":"failed to start: %s"}`, err), 500)
 		return
 	}
-	log.Close()
+	// Do NOT close log here — child process is still writing to it.
+	// Close it when the child exits.
 
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(c.Process.Pid)), 0644)
-	go func() { _ = c.Wait() }()
+	go func() {
+		_ = c.Wait()
+		log.Close()
+	}()
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "started", "pid": c.Process.Pid, "command": meta.Command,

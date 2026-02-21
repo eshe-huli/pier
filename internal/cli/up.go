@@ -79,7 +79,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Check for docker-compose project
 	cf, composeErr := compose.Parse(dir)
 	if composeErr == nil {
-		return runUpCompose(dir, projectName, cf, cfg)
+		return runUpCompose(cmd.Context(), dir, projectName, cf, cfg)
 	}
 
 	// Step 2: Detect services
@@ -267,7 +267,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 }
 
 // runUpCompose handles docker-compose.yml projects
-func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.Config) error {
+func runUpCompose(ctx context.Context, dir, projectName string, cf *compose.ComposeFile, cfg *config.Config) error {
 	infraSvcs, appSvcs := compose.SeparateServices(cf)
 
 	// Ensure shared infra
@@ -318,7 +318,7 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 
 	// If no app services in compose, fall through to normal build (Dockerfile + .pier)
 	if len(appSvcs) == 0 {
-		return runUpBuild(dir, projectName, cfg, sharedServices, dbCreated)
+		return runUpBuild(ctx, dir, projectName, cfg, sharedServices, dbCreated)
 	}
 
 	// Build and run app services
@@ -350,7 +350,7 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 		}
 
 		// Stop old
-		_ = docker.StopAndRemoveContainer(context.Background(), appName)
+		_ = docker.StopAndRemoveContainer(ctx, appName)
 
 		// Determine port
 		port := parseFirstPort(app.Ports)
@@ -479,7 +479,7 @@ func runUpCompose(dir, projectName string, cf *compose.ComposeFile, cfg *config.
 }
 
 // runUpBuild handles the build+run path when compose has no app services
-func runUpBuild(dir, projectName string, cfg *config.Config, sharedServices []infra.SharedService, dbCreated bool) error {
+func runUpBuild(ctx context.Context, dir, projectName string, cfg *config.Config, sharedServices []infra.SharedService, dbCreated bool) error {
 	var pf *pierfile.Pierfile
 	if pierfile.Exists(dir) {
 		pf, _ = pierfile.Load(dir)
@@ -533,7 +533,7 @@ func runUpBuild(dir, projectName string, cfg *config.Config, sharedServices []in
 	}
 	success("Image built")
 
-	_ = docker.StopAndRemoveContainer(context.Background(), projectName)
+	_ = docker.StopAndRemoveContainer(ctx, projectName)
 
 	step(4, fmt.Sprintf("Starting %s...", cyan(projectName)))
 	envOverrides := runtime.BuildEnvOverrides(sharedServices)
