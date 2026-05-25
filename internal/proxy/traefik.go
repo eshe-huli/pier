@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 
@@ -19,6 +20,8 @@ import (
 const (
 	traefikContainerName = "pier-traefik"
 	composeProjectName   = "pier"
+	composeProjectLabel  = "com.docker.compose.project"
+	composeServiceLabel  = "com.docker.compose.service"
 )
 
 // TraefikRouter represents a route from the Traefik API
@@ -141,15 +144,23 @@ networks:
 
 // StartTraefik starts the Traefik container via docker compose
 func StartTraefik(ctx context.Context, cfg *config.Config) error {
-	// Check if already running
-	if IsTraefikRunning(ctx) {
-		return nil
-	}
-
 	// Generate/update the compose file
 	composePath, err := generateComposeFile(cfg)
 	if err != nil {
 		return err
+	}
+
+	info, found, err := inspectTraefik(ctx)
+	if err != nil {
+		return fmt.Errorf("inspecting Traefik container: %w", err)
+	}
+	if found && isComposeManagedInspect(info) && info.State != nil && info.State.Running {
+		return nil
+	}
+	if found && !isComposeManagedInspect(info) {
+		if err := removeTraefikContainer(ctx); err != nil {
+			return fmt.Errorf("removing legacy Traefik container: %w", err)
+		}
 	}
 
 	// Run docker compose up -d
@@ -179,6 +190,10 @@ func StopTraefik(ctx context.Context) error {
 	}
 
 	// Fallback: stop via Docker API (for containers created before compose migration)
+	return removeTraefikContainer(ctx)
+}
+
+func removeTraefikContainer(ctx context.Context) error {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return fmt.Errorf("connecting to Docker: %w", err)
@@ -186,25 +201,51 @@ func StopTraefik(ctx context.Context) error {
 	defer cli.Close()
 
 	_ = cli.ContainerStop(ctx, traefikContainerName, container.StopOptions{})
-	_ = cli.ContainerRemove(ctx, traefikContainerName, container.RemoveOptions{Force: true})
+	if err := cli.ContainerRemove(ctx, traefikContainerName, container.RemoveOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
+		return fmt.Errorf("removing Traefik container: %w", err)
+	}
 
 	return nil
 }
 
 // IsTraefikRunning checks if the Traefik container is running
 func IsTraefikRunning(ctx context.Context) bool {
+	info, found, err := inspectTraefik(ctx)
+	return err == nil && found && info.State != nil && info.State.Running
+}
+
+func IsTraefikComposeManaged(ctx context.Context) bool {
+	info, found, err := inspectTraefik(ctx)
+	return err == nil && found && isComposeManagedInspect(info)
+}
+
+func inspectTraefik(ctx context.Context) (container.InspectResponse, bool, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		return false
+		return container.InspectResponse{}, false, err
 	}
 	defer cli.Close()
 
 	info, err := cli.ContainerInspect(ctx, traefikContainerName)
 	if err != nil {
-		return false
+		if errdefs.IsNotFound(err) {
+			return container.InspectResponse{}, false, nil
+		}
+		return container.InspectResponse{}, false, err
 	}
 
-	return info.State.Running
+	return info, true, nil
+}
+
+func isComposeManagedInspect(info container.InspectResponse) bool {
+	if info.Config == nil {
+		return false
+	}
+	return isComposeManagedLabels(info.Config.Labels)
+}
+
+func isComposeManagedLabels(labels map[string]string) bool {
+	return labels[composeProjectLabel] == composeProjectName && labels[composeServiceLabel] == "traefik"
 }
 
 // GetTraefikRouters fetches active routes from the Traefik API

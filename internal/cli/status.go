@@ -47,11 +47,15 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	// Traefik
 	if proxy.IsTraefikRunning(ctx) {
-		routeCount := proxy.GetTraefikRouteCount(proxy.DashboardHostPort(cfg))
-		if routeCount > 0 {
-			fmt.Printf("  Traefik:    %s\n", green(fmt.Sprintf("✅ running (%d routes)", routeCount)))
+		if !proxy.IsTraefikComposeManaged(ctx) {
+			fmt.Printf("  Traefik:    %s\n", yellow("⚠️  legacy container"))
 		} else {
-			fmt.Printf("  Traefik:    %s\n", green("✅ running"))
+			routeCount := proxy.GetTraefikRouteCount(proxy.DashboardHostPort(cfg))
+			if routeCount > 0 {
+				fmt.Printf("  Traefik:    %s\n", green(fmt.Sprintf("✅ running (%d routes)", routeCount)))
+			} else {
+				fmt.Printf("  Traefik:    %s\n", green("✅ running"))
+			}
 		}
 	} else {
 		fmt.Printf("  Traefik:    %s\n", red("❌ not running"))

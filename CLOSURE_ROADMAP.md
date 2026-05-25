@@ -30,11 +30,13 @@ project files. Docker is the runtime adapter, not the product surface.
   FastAPI, and Laravel app domains, ports, languages, and shared service specs.
 - HTTP edge behavior is explicit: nginx remains the default Valet-compatible
   port 80 owner, while `nginx.managed=false` lets Traefik bind port 80 directly.
+- Startup now detects legacy standalone `pier-traefik` containers and replaces
+  them with the compose-managed Pier stack during init/restart.
 
 ## Next Low-Level Closures
 
-1. Add upgrade handling for existing non-compose Pier infrastructure so users
-   can move from v0.1 to v0.2 without orphaned containers.
+1. Extract the duplicated Docker run/build path into the internal orchestrator
+   package so `pier run`, `pier up`, and future commands share one executor.
 
 ## Verification Gates
 

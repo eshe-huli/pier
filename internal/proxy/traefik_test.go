@@ -73,6 +73,52 @@ func TestGenerateComposeFileCanBindTraefikDirectlyToPort80(t *testing.T) {
 	}
 }
 
+func TestComposeManagedLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   bool
+	}{
+		{
+			name: "compose managed pier traefik",
+			labels: map[string]string{
+				composeProjectLabel: composeProjectName,
+				composeServiceLabel: "traefik",
+			},
+			want: true,
+		},
+		{
+			name: "legacy pier traefik",
+			labels: map[string]string{
+				"pier.domain": "traefik",
+			},
+			want: false,
+		},
+		{
+			name: "different compose project",
+			labels: map[string]string{
+				composeProjectLabel: "other",
+				composeServiceLabel: "traefik",
+			},
+			want: false,
+		},
+		{
+			name:   "nil labels",
+			labels: nil,
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isComposeManagedLabels(tt.labels)
+			if got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {

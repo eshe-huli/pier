@@ -79,8 +79,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	{
 		c := checkResult{Name: "Traefik container"}
 		if proxy.IsTraefikRunning(ctx) {
-			c.OK = true
-			c.Detail = "running"
+			if proxy.IsTraefikComposeManaged(ctx) {
+				c.OK = true
+				c.Detail = "running"
+			} else {
+				c.Detail = "legacy container"
+				c.Fix = "pier restart"
+			}
 		} else {
 			c.Detail = "not running"
 			c.Fix = "pier init"

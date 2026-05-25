@@ -74,6 +74,9 @@ func isPierSystemReady() bool {
 	if !proxy.IsTraefikRunning(ctx) {
 		return false
 	}
+	if !proxy.IsTraefikComposeManaged(ctx) {
+		return false
+	}
 	exists, err := docker.NetworkExists(ctx, "pier")
 	return err == nil && exists
 }
