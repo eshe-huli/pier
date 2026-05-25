@@ -26,15 +26,14 @@ project files. Docker is the runtime adapter, not the product surface.
   build contexts, Dockerfile paths, route names, ports, env, and bind mounts.
 - `.pier/manifest.yaml` now records project-local plan details and can feed
   planner service, port, and env overrides without changing committed files.
+- Planner fixture tests now cover Next, Nest, Astro, Remix, Rails, Go, Django,
+  FastAPI, and Laravel app domains, ports, languages, and shared service specs.
 
 ## Next Low-Level Closures
 
-1. Add integration tests using fixture projects under an ignored examples
-   directory to prove Next, Nest, Astro, Remix, Rails, Go, Django/FastAPI, and
-   Laravel all route to `*.dock`.
-2. Decide whether Nginx remains required or whether Traefik can bind directly
+1. Decide whether Nginx remains required or whether Traefik can bind directly
    to port 80 with a clearer sudo/manual step.
-3. Add upgrade handling for existing non-compose Pier infrastructure so users
+2. Add upgrade handling for existing non-compose Pier infrastructure so users
    can move from v0.1 to v0.2 without orphaned containers.
 
 ## Verification Gates

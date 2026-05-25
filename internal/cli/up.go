@@ -186,6 +186,7 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 
 		// Run
 		dockerArgs := []string{"run", "-d", "--name", app.Name, "--network", cfg.Network, "--restart", "unless-stopped"}
+		domain := app.Domain(cfg.TLD)
 
 		// For built apps: use .pier/env file (clean, no baked-in env)
 		// For sidecars (image-only): pass env vars individually
@@ -206,7 +207,7 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 		// Traefik labels
 		dockerArgs = append(dockerArgs,
 			"-l", "traefik.enable=true",
-			"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", app.Name, app.Name, cfg.TLD),
+			"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", app.Name, domain),
 		)
 		if app.Port > 0 {
 			dockerArgs = append(dockerArgs,
@@ -240,8 +241,7 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 	// Print result
 	fmt.Println()
 	for _, app := range apps {
-		domain := fmt.Sprintf("%s.%s", app.Name, cfg.TLD)
-		fmt.Printf("  %s %s\n", green("✅"), bold(domain))
+		fmt.Printf("  %s %s\n", green("✅"), bold(app.Domain(cfg.TLD)))
 	}
 	fmt.Println()
 
@@ -292,6 +292,7 @@ func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, 
 	step(4, fmt.Sprintf("Starting %s...", cyan(app.Name)))
 	envOverrides := planner.RuntimeEnv(projectName, runtime.BuildEnvOverrides(sharedServices))
 	dockerArgs := []string{"run", "-d", "--name", app.Name, "--network", cfg.Network, "--restart", "unless-stopped"}
+	domain := app.Domain(cfg.TLD)
 	for _, e := range envOverrides {
 		dockerArgs = append(dockerArgs, "-e", e)
 	}
@@ -300,7 +301,7 @@ func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, 
 	}
 	dockerArgs = append(dockerArgs,
 		"-l", "traefik.enable=true",
-		"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", app.Name, app.Name, cfg.TLD),
+		"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", app.Name, domain),
 	)
 	if app.Port > 0 {
 		dockerArgs = append(dockerArgs,
@@ -320,7 +321,6 @@ func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, 
 	}
 
 	fmt.Println()
-	domain := fmt.Sprintf("%s.%s", app.Name, cfg.TLD)
 	fmt.Printf("  %s %s\n", green("✅"), bold(domain))
 	fmt.Println()
 	if len(sharedServices) > 0 {

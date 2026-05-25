@@ -53,6 +53,14 @@ type AppPlan struct {
 	UseEnvFile   bool
 }
 
+func (app AppPlan) Domain(tld string) string {
+	tld = strings.TrimPrefix(tld, ".")
+	if tld == "" {
+		return app.Name
+	}
+	return fmt.Sprintf("%s.%s", app.Name, tld)
+}
+
 func PlanProject(dir string) (*Plan, error) {
 	projectName := filepath.Base(filepath.Clean(dir))
 
