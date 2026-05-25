@@ -267,6 +267,7 @@ internal/
   config/          Configuration management
   dns/             dnsmasq + resolver setup
   docker/          Docker network + container discovery
+  orchestrator/    Runtime adapter boundary for plan/build/run/route execution
   proxy/           Traefik + nginx + file provider
   dashboard/       Embedded web dashboard
 ```

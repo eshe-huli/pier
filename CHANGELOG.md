@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Runtime adapter boundary in the shared orchestrator, with Docker as the
+  default adapter for `pier up` and `pier run`.
 - `pier up --dry-run` and `pier run --dry-run` preview Pier's app, service,
   route, port, env, and image plan without touching Docker or local project
   files.

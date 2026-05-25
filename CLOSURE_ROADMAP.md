@@ -39,12 +39,15 @@ project files. Docker is the runtime adapter, not the product surface.
   paths that verify detected apps, shared services, domains, ports, env, and
   images without touching Docker, proxy files, registry state, manifests, or
   `.gitignore`.
+- `pier up` and `pier run` now execute through an explicit `RuntimeAdapter`
+  boundary, with Docker registered as the default adapter and tests proving the
+  CLI-facing orchestrator can swap adapters without changing the plan shape.
 
 ## Next Low-Level Closures
 
-1. Add an explicit runtime adapter boundary behind `pier up`/`pier run` so the
-   Docker path, local process path, and future non-Docker runtimes share one
-   plan/execute contract.
+1. Implement the local-process runtime adapter against the same `RuntimeAdapter`
+   contract so `pier up` can choose process mode without Docker while preserving
+   the same domain, proxy, registry, and dry-run behavior.
 
 ## Verification Gates
 

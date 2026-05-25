@@ -8,6 +8,71 @@ import (
 	"github.com/eshe-huli/pier/internal/config"
 )
 
+type fakeRuntimeAdapter struct {
+	buildCalled bool
+	runCalled   bool
+}
+
+func (a *fakeRuntimeAdapter) Name() string {
+	return "fake"
+}
+
+func (a *fakeRuntimeAdapter) BuildImage(_ context.Context, _ AppSpec) (string, int, error) {
+	a.buildCalled = true
+	return "fake-image", 4242, nil
+}
+
+func (a *fakeRuntimeAdapter) RunApp(_ context.Context, _ AppSpec, _ string, _ int, _ *config.Config, _ []string) error {
+	a.runCalled = true
+	return nil
+}
+
+func TestDefaultRuntimeAdapterIsDocker(t *testing.T) {
+	if DefaultRuntimeAdapter.Name() != "docker" {
+		t.Fatalf("default runtime adapter = %q", DefaultRuntimeAdapter.Name())
+	}
+}
+
+func TestBuildImageUsesDefaultRuntimeAdapter(t *testing.T) {
+	previous := DefaultRuntimeAdapter
+	fake := &fakeRuntimeAdapter{}
+	DefaultRuntimeAdapter = fake
+	defer func() { DefaultRuntimeAdapter = previous }()
+
+	image, port, err := BuildImage(context.Background(), AppSpec{Name: "api"})
+	if err != nil {
+		t.Fatalf("BuildImage returned error: %v", err)
+	}
+	if !fake.buildCalled {
+		t.Fatal("fake runtime adapter was not called")
+	}
+	if image != "fake-image" || port != 4242 {
+		t.Fatalf("image/port = %q/%d", image, port)
+	}
+}
+
+func TestRunContainerUsesDefaultRuntimeAdapter(t *testing.T) {
+	previous := DefaultRuntimeAdapter
+	fake := &fakeRuntimeAdapter{}
+	DefaultRuntimeAdapter = fake
+	defer func() { DefaultRuntimeAdapter = previous }()
+
+	err := RunContainer(
+		context.Background(),
+		AppSpec{Name: "api"},
+		"fake-image",
+		4242,
+		&config.Config{},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("RunContainer returned error: %v", err)
+	}
+	if !fake.runCalled {
+		t.Fatal("fake runtime adapter was not called")
+	}
+}
+
 func TestBuildImagePrebuiltSkipsDocker(t *testing.T) {
 	image, port, err := BuildImage(context.Background(), AppSpec{
 		Name:     "api",

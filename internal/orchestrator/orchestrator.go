@@ -47,8 +47,35 @@ type Result struct {
 	DBCreated      bool
 }
 
-// BuildImage builds a Docker image for the app. Returns the image name.
+// RuntimeAdapter is the boundary between Pier's plan and a concrete runtime.
+type RuntimeAdapter interface {
+	Name() string
+	BuildImage(ctx context.Context, spec AppSpec) (string, int, error)
+	RunApp(ctx context.Context, spec AppSpec, image string, port int, cfg *config.Config, envOverrides []string) error
+}
+
+// DockerAdapter executes Pier plans through Docker.
+type DockerAdapter struct{}
+
+func (DockerAdapter) Name() string {
+	return "docker"
+}
+
+// DefaultRuntimeAdapter is used by CLI commands until a command selects another runtime.
+var DefaultRuntimeAdapter RuntimeAdapter = DockerAdapter{}
+
+// BuildImage builds an app artifact through the configured runtime adapter.
 func BuildImage(ctx context.Context, spec AppSpec) (string, int, error) {
+	return DefaultRuntimeAdapter.BuildImage(ctx, spec)
+}
+
+// RunContainer executes an app through the configured runtime adapter.
+func RunContainer(ctx context.Context, spec AppSpec, image string, port int, cfg *config.Config, envOverrides []string) error {
+	return DefaultRuntimeAdapter.RunApp(ctx, spec, image, port, cfg, envOverrides)
+}
+
+// BuildImage builds a Docker image for the app. Returns the image name.
+func (DockerAdapter) BuildImage(ctx context.Context, spec AppSpec) (string, int, error) {
 	imageName := spec.Image
 	if imageName == "" {
 		imageName = spec.Name
@@ -229,8 +256,8 @@ func DockerRunArgs(spec AppSpec, image string, port int, cfg *config.Config, env
 	return dockerArgs
 }
 
-// RunContainer stops the old container, starts a new one, and registers it.
-func RunContainer(ctx context.Context, spec AppSpec, image string, port int, cfg *config.Config, envOverrides []string) error {
+// RunApp stops the old container, starts a new one, and registers it.
+func (adapter DockerAdapter) RunApp(ctx context.Context, spec AppSpec, image string, port int, cfg *config.Config, envOverrides []string) error {
 	// Stop old container
 	if err := docker.StopAndRemoveContainer(ctx, spec.Name); err != nil {
 		// Non-fatal, container might not exist
@@ -248,7 +275,7 @@ func RunContainer(ctx context.Context, spec AppSpec, image string, port int, cfg
 	// Register project
 	registerType := spec.RegisterType
 	if registerType == "" {
-		registerType = "docker"
+		registerType = adapter.Name()
 	}
 	if err := registry.Register(registry.Project{Name: spec.Name, Dir: spec.Dir, Port: port, Type: registerType}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not register project: %v\n", err)
