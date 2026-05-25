@@ -157,7 +157,8 @@ func runLink(cmd *cobra.Command, args []string) error {
 		log.Close()
 		return fmt.Errorf("starting dev server: %w", err)
 	}
-	log.Close()
+	// Do NOT close log here — child process is still writing to it.
+	// Close it when the child exits.
 
 	// Save PID
 	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(c.Process.Pid)), 0644)
@@ -166,7 +167,10 @@ func runLink(cmd *cobra.Command, args []string) error {
 	saveLinkMeta(name, dir, port, devCmd, fwName)
 
 	// Don't wait — detach
-	go func() { _ = c.Wait() }()
+	go func() {
+		_ = c.Wait()
+		log.Close()
+	}()
 
 	success(fmt.Sprintf("Dev server started (PID %d)", c.Process.Pid))
 	fmt.Println()

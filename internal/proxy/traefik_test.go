@@ -1,0 +1,51 @@
+package proxy
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/eshe-huli/pier/internal/config"
+)
+
+func TestGenerateComposeFileGroupsPierInfrastructure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := config.Default()
+	cfg.Network = "pier-test"
+	cfg.Traefik.Port = 8890
+
+	composePath, err := generateComposeFile(cfg)
+	if err != nil {
+		t.Fatalf("generateComposeFile returned error: %v", err)
+	}
+
+	wantPath := filepath.Join(home, ".pier", "docker-compose.yml")
+	if composePath != wantPath {
+		t.Fatalf("got compose path %q, want %q", composePath, wantPath)
+	}
+
+	data, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("reading compose file: %v", err)
+	}
+	compose := string(data)
+
+	assertContains(t, compose, "name: pier")
+	assertContains(t, compose, "container_name: pier-traefik")
+	assertContains(t, compose, `- "8890:80"`)
+	assertContains(t, compose, `- "8891:8080"`)
+	assertContains(t, compose, "external: true")
+	assertContains(t, compose, "pier-test:")
+	assertContains(t, compose, filepath.Join(home, ".pier", "traefik", "traefik.yaml"))
+	assertContains(t, compose, filepath.Join(home, ".pier", "traefik", "dynamic"))
+}
+
+func assertContains(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if !strings.Contains(haystack, needle) {
+		t.Fatalf("expected compose file to contain %q\n\n%s", needle, haystack)
+	}
+}

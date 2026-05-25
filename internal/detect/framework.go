@@ -24,6 +24,12 @@ func DetectFramework(dir string) (*Framework, error) {
 	if hasPkgDep(dir, "nuxt") {
 		return &Framework{"nuxt", "node", 3000}, nil
 	}
+	if hasPkgDep(dir, "astro") {
+		return &Framework{"astro", "node", 4321}, nil
+	}
+	if hasPkgDep(dir, "@remix-run/react") {
+		return &Framework{"remix", "node", 3000}, nil
+	}
 	if hasPkgDep(dir, "express") {
 		return &Framework{"express", "node", 3000}, nil
 	}

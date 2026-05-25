@@ -35,6 +35,38 @@ func TestDetectFramework_NextJS(t *testing.T) {
 	}
 }
 
+func TestDetectFramework_Astro(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "package.json", `{"dependencies":{"astro":"^5.0.0"}}`)
+
+	fw, err := DetectFramework(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fw.Name != "astro" {
+		t.Errorf("got framework %q, want astro", fw.Name)
+	}
+	if fw.Port != 4321 {
+		t.Errorf("got port %d, want 4321", fw.Port)
+	}
+}
+
+func TestDetectFramework_Remix(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "package.json", `{"dependencies":{"@remix-run/react":"^2.0.0"}}`)
+
+	fw, err := DetectFramework(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fw.Name != "remix" {
+		t.Errorf("got framework %q, want remix", fw.Name)
+	}
+	if fw.Port != 3000 {
+		t.Errorf("got port %d, want 3000", fw.Port)
+	}
+}
+
 func TestDetectFramework_Laravel(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "composer.json", `{"require":{"laravel/framework":"^11.0"}}`)

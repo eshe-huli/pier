@@ -4,34 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
 
 	"github.com/eshe-huli/pier/internal/config"
 )
 
 const (
 	traefikContainerName = "pier-traefik"
+	composeProjectName   = "pier"
 )
 
 // TraefikRouter represents a route from the Traefik API
 type TraefikRouter struct {
-	Name     string `json:"name"`
-	Rule     string `json:"rule"`
-	Service  string `json:"service"`
-	Status   string `json:"status"`
-	Provider string `json:"provider"`
+	Name        string   `json:"name"`
+	Rule        string   `json:"rule"`
+	Service     string   `json:"service"`
+	Status      string   `json:"status"`
+	Provider    string   `json:"provider"`
 	EntryPoints []string `json:"entryPoints"`
 }
 
@@ -55,7 +51,7 @@ providers:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
     network: %s
-    defaultRule: "Host(` + "`" + `{{ trimPrefix ` + "`" + `/` + "`" + ` .Name }}.%s` + "`" + `)"
+    defaultRule: "Host(`+"`"+`{{ trimPrefix `+"`"+`/`+"`"+` .Name }}.%s`+"`"+`)"
   file:
     directory: "/etc/traefik/dynamic"
     watch: true
@@ -76,120 +72,103 @@ providers:
 	return nil
 }
 
-// StartTraefik starts the Traefik container
+// generateComposeFile writes the Pier infra docker-compose.yml to ~/.pier/
+// This ensures all Pier services appear grouped in Docker Desktop.
+func generateComposeFile(cfg *config.Config) (string, error) {
+	pierDir := config.PierDir()
+	if err := os.MkdirAll(pierDir, 0755); err != nil {
+		return "", fmt.Errorf("creating pier directory: %w", err)
+	}
+
+	traefikYaml := config.TraefikConfigPath()
+	dynamicDir := config.TraefikDynamicDir()
+	composePath := filepath.Join(pierDir, "docker-compose.yml")
+
+	compose := fmt.Sprintf(`# Pier Infrastructure - managed by pier CLI
+# This file groups all Pier services in Docker Desktop
+name: pier
+
+services:
+  traefik:
+    image: %s
+    container_name: %s
+    restart: unless-stopped
+    labels:
+      - pier.domain=traefik
+      - traefik.enable=true
+    ports:
+      - "%d:80"
+      - "%d:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - %s:/etc/traefik/traefik.yaml
+      - %s:/etc/traefik/dynamic
+    networks:
+      - %s
+
+networks:
+  %s:
+    external: true
+`, cfg.Traefik.Image, traefikContainerName,
+		cfg.Traefik.Port, cfg.Traefik.Port+1,
+		traefikYaml, dynamicDir,
+		cfg.Network, cfg.Network)
+
+	if err := os.WriteFile(composePath, []byte(compose), 0644); err != nil {
+		return "", fmt.Errorf("writing compose file: %w", err)
+	}
+
+	return composePath, nil
+}
+
+// StartTraefik starts the Traefik container via docker compose
 func StartTraefik(ctx context.Context, cfg *config.Config) error {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	// Check if already running
+	if IsTraefikRunning(ctx) {
+		return nil
+	}
+
+	// Generate/update the compose file
+	composePath, err := generateComposeFile(cfg)
 	if err != nil {
-		return fmt.Errorf("connecting to Docker: %w", err)
-	}
-	defer cli.Close()
-
-	// Check if container already exists and is running
-	info, err := cli.ContainerInspect(ctx, traefikContainerName)
-	if err == nil {
-		if info.State.Running {
-			return nil // Already running
-		}
-		// Container exists but stopped — remove and recreate
-		_ = cli.ContainerRemove(ctx, traefikContainerName, container.RemoveOptions{Force: true})
+		return err
 	}
 
-	// Pull image if needed
-	_, _, err = cli.ImageInspectWithRaw(ctx, cfg.Traefik.Image)
-	if err != nil {
-		reader, pullErr := cli.ImagePull(ctx, cfg.Traefik.Image, image.PullOptions{})
-		if pullErr != nil {
-			return fmt.Errorf("pulling Traefik image: %w", pullErr)
-		}
-		defer reader.Close()
-		_, _ = io.Copy(io.Discard, reader) // Wait for pull to complete
-	}
+	// Run docker compose up -d
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composePath, "-p", composeProjectName, "up", "-d")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-	// Resolve paths
-	home, _ := os.UserHomeDir()
-	traefikYaml := filepath.Join(home, ".pier", "traefik", "traefik.yaml")
-	dynamicDir := filepath.Join(home, ".pier", "traefik", "dynamic")
-
-	// Container config
-	containerCfg := &container.Config{
-		Image: cfg.Traefik.Image,
-		Labels: map[string]string{
-			"pier.domain":    "traefik",
-			"traefik.enable": "true",
-		},
-		ExposedPorts: nat.PortSet{
-			"80/tcp":   {},
-			"8080/tcp": {},
-		},
-	}
-
-	hostCfg := &container.HostConfig{
-		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
-		PortBindings: nat.PortMap{
-			"80/tcp": []nat.PortBinding{
-				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", cfg.Traefik.Port)},
-			},
-			"8080/tcp": []nat.PortBinding{
-				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", cfg.Traefik.Port+1)},
-			},
-		},
-		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeBind,
-				Source: "/var/run/docker.sock",
-				Target: "/var/run/docker.sock",
-			},
-			{
-				Type:   mount.TypeBind,
-				Source: traefikYaml,
-				Target: "/etc/traefik/traefik.yaml",
-			},
-			{
-				Type:   mount.TypeBind,
-				Source: dynamicDir,
-				Target: "/etc/traefik/dynamic",
-			},
-		},
-	}
-
-	networkCfg := &network.NetworkingConfig{
-		EndpointsConfig: map[string]*network.EndpointSettings{
-			cfg.Network: {},
-		},
-	}
-
-	resp, err := cli.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, traefikContainerName)
-	if err != nil {
-		return fmt.Errorf("creating Traefik container: %w", err)
-	}
-
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("starting Traefik container: %w", err)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("starting Pier infrastructure: %w", err)
 	}
 
 	return nil
 }
 
-// StopTraefik stops and removes the Traefik container
+// StopTraefik stops and removes the Traefik container via docker compose
 func StopTraefik(ctx context.Context) error {
+	composePath := filepath.Join(config.PierDir(), "docker-compose.yml")
+
+	// Try compose down first (if compose file exists)
+	if _, err := os.Stat(composePath); err == nil {
+		cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composePath, "-p", composeProjectName, "down")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+
+	// Fallback: stop via Docker API (for containers created before compose migration)
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return fmt.Errorf("connecting to Docker: %w", err)
 	}
 	defer cli.Close()
 
-	if err := cli.ContainerStop(ctx, traefikContainerName, container.StopOptions{}); err != nil {
-		if !strings.Contains(err.Error(), "No such container") &&
-			!strings.Contains(err.Error(), "is not running") {
-			return fmt.Errorf("stopping Traefik: %w", err)
-		}
-	}
-
-	if err := cli.ContainerRemove(ctx, traefikContainerName, container.RemoveOptions{Force: true}); err != nil {
-		if !strings.Contains(err.Error(), "No such container") {
-			return fmt.Errorf("removing Traefik: %w", err)
-		}
-	}
+	_ = cli.ContainerStop(ctx, traefikContainerName, container.StopOptions{})
+	_ = cli.ContainerRemove(ctx, traefikContainerName, container.RemoveOptions{Force: true})
 
 	return nil
 }

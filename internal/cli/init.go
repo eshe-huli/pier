@@ -13,9 +13,9 @@ import (
 
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/detect"
-	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/dns"
 	"github.com/eshe-huli/pier/internal/docker"
+	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/pierfile"
 	"github.com/eshe-huli/pier/internal/proxy"
 )
@@ -96,7 +96,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 func runProjectInitLogic(dir string) error {
 	header := color.New(color.FgCyan, color.Bold)
-	header.Println("\n🔩 Pier — Project Init\n")
+	fmt.Println()
+	header.Println("🔩 Pier — Project Init")
+	fmt.Println()
 
 	// 1. Detect framework
 	fw, fwErr := detect.DetectFramework(dir)
@@ -182,7 +184,9 @@ func runSystemInit(cmd *cobra.Command, args []string) error {
 	stepNum := 0
 
 	header := color.New(color.FgCyan, color.Bold)
-	header.Println("\n🔩 Pier — Initializing...\n")
+	fmt.Println()
+	header.Println("🔩 Pier — Initializing...")
+	fmt.Println()
 
 	// Step 1: Check Docker
 	stepNum++
@@ -301,14 +305,16 @@ func runSystemInit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	if len(manualSteps) > 0 {
-		header.Println("  📋 Manual steps needed (requires sudo):\n")
+		header.Println("  📋 Manual steps needed (requires sudo):")
+		fmt.Println()
 		for i, s := range manualSteps {
 			fmt.Printf("  %s %s\n", yellow(fmt.Sprintf("%d.", i+1)), s)
 			fmt.Println()
 		}
 	}
 
-	header.Println("  🎉 Pier initialized!\n")
+	header.Println("  🎉 Pier initialized!")
+	fmt.Println()
 	fmt.Printf("  TLD:        %s\n", green("."+cfg.TLD))
 	fmt.Printf("  Network:    %s\n", green(cfg.Network))
 	fmt.Printf("  Traefik:    %s\n", green(fmt.Sprintf(":%d", cfg.Traefik.Port)))

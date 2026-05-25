@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 )
 
 const dnsmasqConfPath = "/opt/homebrew/etc/dnsmasq.conf"
@@ -56,6 +57,15 @@ func IsDnsmasqRunning() bool {
 	if err == nil {
 		return true
 	}
-	// On macOS, /proc doesn't exist. Try kill -0
-	return true // If PID file exists, assume running on macOS
+	// On macOS, /proc doesn't exist. Check via kill -0 syscall.
+	var pidInt int
+	if _, err := fmt.Sscanf(pid, "%d", &pidInt); err != nil {
+		return false
+	}
+	proc, err := os.FindProcess(pidInt)
+	if err != nil {
+		return false
+	}
+	// Signal 0 checks if process exists without actually signaling it
+	return proc.Signal(syscall.Signal(0)) == nil
 }
