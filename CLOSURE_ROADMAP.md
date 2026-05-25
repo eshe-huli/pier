@@ -35,12 +35,16 @@ project files. Docker is the runtime adapter, not the product surface.
 - `pier up` and `pier run` now share the internal orchestrator for Docker image
   builds, container runs, env injection, route labels, volumes, entrypoints, and
   registry updates.
+- `pier up --dry-run` and `pier run --dry-run` now provide command-level smoke
+  paths that verify detected apps, shared services, domains, ports, env, and
+  images without touching Docker, proxy files, registry state, manifests, or
+  `.gitignore`.
 
 ## Next Low-Level Closures
 
-1. Add command-level smoke coverage around `pier up` and `pier run` with a fake
-   Docker/infra boundary so the Valet-like flow stays verifiable without a live
-   Docker daemon in every test run.
+1. Add an explicit runtime adapter boundary behind `pier up`/`pier run` so the
+   Docker path, local process path, and future non-Docker runtimes share one
+   plan/execute contract.
 
 ## Verification Gates
 

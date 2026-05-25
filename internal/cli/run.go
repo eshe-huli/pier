@@ -19,6 +19,7 @@ var runPort int
 var runEnvs []string
 var runBuild bool
 var runServices []string
+var runDryRun bool
 
 var runCmd = &cobra.Command{
 	Use:   "run <name>",
@@ -30,7 +31,8 @@ Examples:
   pier run myapp --image myapp:latest
   pier run myapp --build --port 3000
   pier run myapp --image node:20 --services postgres:16,redis:7
-  pier run myapp --build --services postgres:16 --env SECRET=abc`,
+  pier run myapp --build --services postgres:16 --env SECRET=abc
+  pier run myapp --image node:20 --dry-run`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRunCmd,
 }
@@ -41,6 +43,7 @@ func init() {
 	runCmd.Flags().StringArrayVarP(&runEnvs, "env", "e", nil, "Extra env vars (repeatable, KEY=VAL)")
 	runCmd.Flags().BoolVar(&runBuild, "build", false, "Build from Dockerfile in current dir first")
 	runCmd.Flags().StringSliceVar(&runServices, "services", nil, "Required services (e.g. postgres:16,redis:7)")
+	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Print the Pier run plan without touching Docker or infra")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -56,8 +59,28 @@ func runRunCmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Step 1: Build if requested
+	// Step 1: Parse and load .pier services if no --services flag
+	services := runServices
+	if len(services) == 0 {
+		services = loadPierFileServices()
+	}
+	if err := validateServiceSpecs(services); err != nil {
+		return err
+	}
+
+	// Step 2: Build if requested
 	image := runImage
+	if runDryRun {
+		if image == "" && runBuild {
+			image = name
+		}
+		if image == "" {
+			return fmt.Errorf("either --image or --build is required")
+		}
+		printRunDryRun(name, image, runPort, services, cfg)
+		return nil
+	}
+
 	if runBuild {
 		step(1, fmt.Sprintf("Building image %s...", cyan(name)))
 		var port int
@@ -78,12 +101,6 @@ func runRunCmd(cmd *cobra.Command, args []string) error {
 
 	if image == "" {
 		return fmt.Errorf("either --image or --build is required")
-	}
-
-	// Step 2: Parse and load .pier services if no --services flag
-	services := runServices
-	if len(services) == 0 {
-		services = loadPierFileServices()
 	}
 
 	// Step 3: Ensure shared services
@@ -143,6 +160,47 @@ func runRunCmd(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	return nil
+}
+
+func validateServiceSpecs(services []string) error {
+	for _, svcSpec := range services {
+		if len(strings.SplitN(svcSpec, ":", 2)) != 2 {
+			return fmt.Errorf("invalid service spec '%s' (expected name:version, e.g. postgres:16)", svcSpec)
+		}
+	}
+	return nil
+}
+
+func printRunDryRun(name, image string, port int, services []string, cfg *config.Config) {
+	fmt.Println()
+	fmt.Println("  Dry run: pier run would execute this plan")
+	fmt.Printf("  Container: %s\n", cyan(name))
+	fmt.Printf("  Image:     %s\n", cyan(image))
+	if port > 0 {
+		tld := strings.TrimPrefix(cfg.TLD, ".")
+		fmt.Printf("  Route:     %s (port %d)\n", cyan(fmt.Sprintf("%s.%s", name, tld)), port)
+	} else {
+		fmt.Println("  Route:     none (no --port provided)")
+	}
+
+	if len(services) > 0 {
+		fmt.Println()
+		fmt.Println("  Shared services:")
+		for _, svc := range services {
+			fmt.Printf("    - %s\n", svc)
+		}
+	}
+
+	if len(runEnvs) > 0 {
+		fmt.Println()
+		fmt.Println("  Extra env:")
+		for _, env := range runEnvs {
+			fmt.Printf("    - %s\n", env)
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("  No Docker, proxy, registry, or shared infrastructure changes were made.")
 }
 
 // createContainerProxy creates a Traefik route for a Docker container (uses container name, not host.docker.internal)

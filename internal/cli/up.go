@@ -19,6 +19,7 @@ import (
 
 var upDetach bool
 var upBuild bool
+var upDryRun bool
 
 var upCmd = &cobra.Command{
 	Use:   "up",
@@ -31,13 +32,15 @@ Shared infrastructure (postgres, redis, etc.) is started automatically.
 Examples:
   pier up
   pier up --detach
-  pier up --build`,
+  pier up --build
+  pier up --dry-run`,
 	RunE: runUp,
 }
 
 func init() {
 	upCmd.Flags().BoolVarP(&upDetach, "detach", "d", true, "Run in background (default true)")
 	upCmd.Flags().BoolVar(&upBuild, "build", false, "Force rebuild even if image exists")
+	upCmd.Flags().BoolVar(&upDryRun, "dry-run", false, "Print the Pier plan without touching Docker or project files")
 	rootCmd.AddCommand(upCmd)
 }
 
@@ -52,15 +55,21 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Ensure .pier/ is in .gitignore
-	_ = gitignore.EnsurePierIgnored(dir)
-
 	fmt.Println()
 
 	runPlan, err := planner.PlanProject(dir)
 	if err != nil {
 		return fmt.Errorf("planning project: %w", err)
 	}
+
+	if upDryRun {
+		printUpDryRun(runPlan, cfg)
+		return nil
+	}
+
+	// Ensure .pier/ is in .gitignore
+	_ = gitignore.EnsurePierIgnored(dir)
+
 	savePlanManifest(runPlan)
 	projectName := runPlan.ProjectName
 
@@ -287,6 +296,50 @@ func savePlanManifest(runPlan *planner.Plan) {
 	if err := planner.SaveManifest(runPlan); err != nil {
 		warn(fmt.Sprintf("Could not write .pier/manifest.yaml: %s", err))
 	}
+}
+
+func printUpDryRun(runPlan *planner.Plan, cfg *config.Config) {
+	fmt.Println("  Dry run: pier up would execute this plan")
+	fmt.Printf("  Project: %s\n", cyan(runPlan.ProjectName))
+	fmt.Printf("  Source:  %s\n", cyan(string(runPlan.Source)))
+
+	if len(runPlan.ServiceSpecs) > 0 {
+		fmt.Println()
+		fmt.Println("  Shared services:")
+		for _, svc := range runPlan.ServiceSpecs {
+			fmt.Printf("    - %s\n", svc)
+		}
+	}
+
+	if len(runPlan.Apps) > 0 {
+		fmt.Println()
+		fmt.Println("  Apps:")
+		for _, app := range runPlan.Apps {
+			name := app.Name
+			if name == "" {
+				name = runPlan.ProjectName
+			}
+			fmt.Printf("    - %s → %s", name, cyan(app.Domain(cfg.TLD)))
+			if app.Port > 0 {
+				fmt.Printf(" (port %d)", app.Port)
+			}
+			if app.BuildContext != "" {
+				fmt.Printf(" build=%s", app.BuildContext)
+			}
+			if app.Dockerfile != "" {
+				fmt.Printf(" dockerfile=%s", app.Dockerfile)
+			}
+			fmt.Println()
+		}
+	}
+
+	if runPlan.Framework != nil {
+		fmt.Println()
+		fmt.Printf("  Framework: %s (%s)\n", cyan(runPlan.Framework.Name), runPlan.Framework.Language)
+	}
+
+	fmt.Println()
+	fmt.Println("  No Docker, proxy, registry, manifest, or gitignore changes were made.")
 }
 
 func appSpecFromPlan(runPlan *planner.Plan, app planner.AppPlan) orchestrator.AppSpec {

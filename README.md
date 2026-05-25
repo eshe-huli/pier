@@ -66,6 +66,8 @@ pier unproxy myapp           # Remove the route
 pier status                  # System health check
 pier doctor                  # Diagnose issues with fix suggestions
 pier dashboard               # Open Traefik dashboard in browser
+pier up --dry-run            # Preview what Pier would run without side effects
+pier run api --image node:20 --dry-run
 pier down                    # Stop Pier infrastructure
 pier restart                 # Restart everything
 pier config                  # View configuration
@@ -189,6 +191,8 @@ Different TLDs, different nginx server blocks. No conflicts.
 |---|---|
 | `pier init` | One-time setup (Docker network, Traefik, dnsmasq, nginx) |
 | `pier ls` | List all active services with their domains |
+| `pier up --dry-run` | Preview the detected app/services/domains without touching Docker or project files |
+| `pier run <name> --image <image> --dry-run` | Preview an ad hoc Docker run plan without starting infra |
 | `pier proxy <name> <port>` | Route `<name>.dock` → `localhost:<port>` |
 | `pier unproxy <name>` | Remove a bare-metal proxy route |
 | `pier status` | System health check |
