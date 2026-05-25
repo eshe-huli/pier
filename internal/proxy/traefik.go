@@ -31,6 +31,24 @@ type TraefikRouter struct {
 	EntryPoints []string `json:"entryPoints"`
 }
 
+func WebHostPort(cfg *config.Config) int {
+	if cfg.Nginx.Managed {
+		return cfg.Traefik.Port
+	}
+	return 80
+}
+
+func DashboardHostPort(cfg *config.Config) int {
+	return cfg.Traefik.Port + 1
+}
+
+func EdgeDescription(cfg *config.Config) string {
+	if cfg.Nginx.Managed {
+		return fmt.Sprintf("nginx :80 -> Traefik :%d", WebHostPort(cfg))
+	}
+	return "Traefik direct :80"
+}
+
 // GenerateTraefikConfig generates the Traefik static configuration
 func GenerateTraefikConfig(cfg *config.Config) error {
 	// Use simple defaultRule — just container name + TLD
@@ -110,7 +128,7 @@ networks:
   %s:
     external: true
 `, cfg.Traefik.Image, traefikContainerName,
-		cfg.Traefik.Port, cfg.Traefik.Port+1,
+		WebHostPort(cfg), DashboardHostPort(cfg),
 		traefikYaml, dynamicDir,
 		cfg.Network, cfg.Network)
 

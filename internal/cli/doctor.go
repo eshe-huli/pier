@@ -128,41 +128,46 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		checks = append(checks, c)
 	}
 
-	// 7. nginx config
-	{
-		c := checkResult{Name: "nginx config linked"}
-		if proxy.IsNginxConfigLinked() {
-			c.OK = true
-			c.Detail = "symlink present"
-		} else {
-			c.Detail = "not linked"
-			c.Fix = proxy.NginxSymlinkInstruction()
+	if cfg.Nginx.Managed {
+		// 7. nginx config
+		{
+			c := checkResult{Name: "nginx config linked"}
+			if proxy.IsNginxConfigLinked() {
+				c.OK = true
+				c.Detail = "symlink present"
+			} else {
+				c.Detail = "not linked"
+				c.Fix = proxy.NginxSymlinkInstruction()
+			}
+			checks = append(checks, c)
 		}
-		checks = append(checks, c)
-	}
 
-	// 8. nginx running
-	{
-		c := checkResult{Name: "nginx process"}
-		if proxy.IsNginxRunning() {
-			c.OK = true
-			c.Detail = "running"
-		} else {
-			c.Detail = "not detected"
-			c.Fix = "sudo brew services start nginx"
+		// 8. nginx running
+		{
+			c := checkResult{Name: "nginx process"}
+			if proxy.IsNginxRunning() {
+				c.OK = true
+				c.Detail = "running"
+			} else {
+				c.Detail = "not detected"
+				c.Fix = "sudo brew services start nginx"
+			}
+			checks = append(checks, c)
 		}
+	} else {
+		c := checkResult{Name: "HTTP edge mode", OK: true, Detail: proxy.EdgeDescription(cfg)}
 		checks = append(checks, c)
 	}
 
 	// 9. Traefik API reachable
 	{
 		c := checkResult{Name: "Traefik API"}
-		apiURL := fmt.Sprintf("http://127.0.0.1:%d/api/overview", cfg.Traefik.Port+1)
+		apiURL := fmt.Sprintf("http://127.0.0.1:%d/api/overview", proxy.DashboardHostPort(cfg))
 		httpClient := &http.Client{Timeout: 3 * time.Second}
 		resp, err := httpClient.Get(apiURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			c.OK = true
-			c.Detail = fmt.Sprintf("reachable at :%d", cfg.Traefik.Port+1)
+			c.Detail = fmt.Sprintf("reachable at :%d", proxy.DashboardHostPort(cfg))
 			resp.Body.Close()
 		} else {
 			c.Detail = "not reachable"

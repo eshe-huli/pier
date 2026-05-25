@@ -16,7 +16,7 @@ import (
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check Pier system health",
-	Long:  `Shows the status of all Pier components: Docker, Traefik, DNS, nginx, and network.`,
+	Long:  `Shows the status of all Pier components: Docker, Traefik, DNS, HTTP edge, and network.`,
 	RunE:  runStatus,
 }
 
@@ -47,7 +47,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	// Traefik
 	if proxy.IsTraefikRunning(ctx) {
-		routeCount := proxy.GetTraefikRouteCount(cfg.Traefik.Port + 1)
+		routeCount := proxy.GetTraefikRouteCount(proxy.DashboardHostPort(cfg))
 		if routeCount > 0 {
 			fmt.Printf("  Traefik:    %s\n", green(fmt.Sprintf("✅ running (%d routes)", routeCount)))
 		} else {
@@ -64,11 +64,16 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  DNS:        %s\n", red(fmt.Sprintf("❌ resolver not configured")))
 	}
 
+	// HTTP edge
+	fmt.Printf("  HTTP Edge:  %s\n", cyan(proxy.EdgeDescription(cfg)))
+
 	// nginx
-	if proxy.IsNginxRunning() {
+	if cfg.Nginx.Managed && proxy.IsNginxRunning() {
 		fmt.Printf("  nginx:      %s\n", green("✅ running"))
-	} else {
+	} else if cfg.Nginx.Managed {
 		fmt.Printf("  nginx:      %s\n", yellow("⚠️  not detected"))
+	} else {
+		fmt.Printf("  nginx:      %s\n", dim("disabled"))
 	}
 
 	// Network

@@ -167,6 +167,11 @@ nginx:
   valet_compatible: true      # Coexists with Laravel Valet
 ```
 
+`nginx.managed: true` is the default because it keeps Pier Valet-compatible:
+nginx owns host port 80 and forwards `*.dock` to Traefik on `traefik.port`.
+Set `nginx.managed: false` and run `pier restart` if you want Traefik to bind
+host port 80 directly instead.
+
 ### Valet Compatibility
 
 Pier coexists with Laravel Valet out of the box:

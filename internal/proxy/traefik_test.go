@@ -43,6 +43,36 @@ func TestGenerateComposeFileGroupsPierInfrastructure(t *testing.T) {
 	assertContains(t, compose, filepath.Join(home, ".pier", "traefik", "dynamic"))
 }
 
+func TestGenerateComposeFileCanBindTraefikDirectlyToPort80(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := config.Default()
+	cfg.Network = "pier-test"
+	cfg.Traefik.Port = 8890
+	cfg.Nginx.Managed = false
+
+	composePath, err := generateComposeFile(cfg)
+	if err != nil {
+		t.Fatalf("generateComposeFile returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("reading compose file: %v", err)
+	}
+	compose := string(data)
+
+	assertContains(t, compose, `- "80:80"`)
+	assertContains(t, compose, `- "8891:8080"`)
+	if WebHostPort(cfg) != 80 {
+		t.Fatalf("got web host port %d, want 80", WebHostPort(cfg))
+	}
+	if EdgeDescription(cfg) != "Traefik direct :80" {
+		t.Fatalf("got edge description %q", EdgeDescription(cfg))
+	}
+}
+
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {

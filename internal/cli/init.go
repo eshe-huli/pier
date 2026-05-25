@@ -264,7 +264,7 @@ func runSystemInit(cmd *cobra.Command, args []string) error {
 		fail(fmt.Sprintf("Failed to start Traefik: %s", err))
 		return err
 	}
-	success(fmt.Sprintf("Traefik running on :%d (dashboard :%d)", cfg.Traefik.Port, cfg.Traefik.Port+1))
+	success(fmt.Sprintf("Traefik running via %s (dashboard :%d)", proxy.EdgeDescription(cfg), proxy.DashboardHostPort(cfg)))
 
 	// Step 7: Check dnsmasq configuration
 	stepNum++
@@ -291,22 +291,28 @@ func runSystemInit(cmd *cobra.Command, args []string) error {
 		manualSteps = append(manualSteps, dns.ResolverCreateInstruction(cfg.TLD))
 	}
 
-	// Step 9: Generate nginx config
-	stepNum++
-	step(stepNum, "Generating nginx configuration...")
-	if err := proxy.GenerateNginxConfig(cfg); err != nil {
-		return fmt.Errorf("generating nginx config: %w", err)
-	}
-	success(fmt.Sprintf("nginx config at %s", dim(config.NginxConfigPath())))
+	if cfg.Nginx.Managed {
+		// Step 9: Generate nginx config
+		stepNum++
+		step(stepNum, "Generating nginx configuration...")
+		if err := proxy.GenerateNginxConfig(cfg); err != nil {
+			return fmt.Errorf("generating nginx config: %w", err)
+		}
+		success(fmt.Sprintf("nginx config at %s", dim(config.NginxConfigPath())))
 
-	// Step 10: Check nginx symlink
-	stepNum++
-	step(stepNum, "Checking nginx symlink...")
-	if proxy.IsNginxConfigLinked() {
-		success("nginx config is linked")
+		// Step 10: Check nginx symlink
+		stepNum++
+		step(stepNum, "Checking nginx symlink...")
+		if proxy.IsNginxConfigLinked() {
+			success("nginx config is linked")
+		} else {
+			warn("nginx config not linked")
+			manualSteps = append(manualSteps, proxy.NginxSymlinkInstruction())
+		}
 	} else {
-		warn("nginx config not linked")
-		manualSteps = append(manualSteps, proxy.NginxSymlinkInstruction())
+		stepNum++
+		step(stepNum, "Using direct Traefik edge...")
+		success("nginx disabled; Traefik binds host :80")
 	}
 
 	// Summary
@@ -328,7 +334,8 @@ func runSystemInit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("  TLD:        %s\n", green("."+cfg.TLD))
 	fmt.Printf("  Network:    %s\n", green(cfg.Network))
-	fmt.Printf("  Traefik:    %s\n", green(fmt.Sprintf(":%d", cfg.Traefik.Port)))
+	fmt.Printf("  HTTP Edge:  %s\n", green(proxy.EdgeDescription(cfg)))
+	fmt.Printf("  Traefik:    %s\n", green(fmt.Sprintf(":%d", proxy.WebHostPort(cfg))))
 	fmt.Printf("  Dashboard:  %s\n", cyan(fmt.Sprintf("http://traefik.%s", cfg.TLD)))
 	fmt.Println()
 	fmt.Printf("  %s Add any Docker container to the '%s' network\n", dim("→"), cfg.Network)

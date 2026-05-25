@@ -28,12 +28,12 @@ project files. Docker is the runtime adapter, not the product surface.
   planner service, port, and env overrides without changing committed files.
 - Planner fixture tests now cover Next, Nest, Astro, Remix, Rails, Go, Django,
   FastAPI, and Laravel app domains, ports, languages, and shared service specs.
+- HTTP edge behavior is explicit: nginx remains the default Valet-compatible
+  port 80 owner, while `nginx.managed=false` lets Traefik bind port 80 directly.
 
 ## Next Low-Level Closures
 
-1. Decide whether Nginx remains required or whether Traefik can bind directly
-   to port 80 with a clearer sudo/manual step.
-2. Add upgrade handling for existing non-compose Pier infrastructure so users
+1. Add upgrade handling for existing non-compose Pier infrastructure so users
    can move from v0.1 to v0.2 without orphaned containers.
 
 ## Verification Gates

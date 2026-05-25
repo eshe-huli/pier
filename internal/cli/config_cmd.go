@@ -101,6 +101,9 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 			info("Run 'pier restart' to apply TLD changes.")
 			info("You may also need to update dnsmasq and /etc/resolver.")
 		}
+		if key == "nginx.managed" || key == "traefik.port" {
+			info("Run 'pier restart' to apply HTTP edge changes.")
+		}
 	} else {
 		info(fmt.Sprintf("%s is already set to %s", key, value))
 	}

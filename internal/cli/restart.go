@@ -50,7 +50,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("starting Traefik: %w", err)
 	}
 
-	success(fmt.Sprintf("Traefik restarted on :%d", cfg.Traefik.Port))
+	success(fmt.Sprintf("Traefik restarted via %s", proxy.EdgeDescription(cfg)))
 	fmt.Println()
 
 	return nil
