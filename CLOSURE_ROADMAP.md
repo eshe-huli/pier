@@ -46,13 +46,15 @@ project files. Docker is the runtime adapter, not the product surface.
   it resolves the same planner app shape, starts a framework/Pierfile command
   when known, creates a file-provider `.dock` route, writes link metadata, and
   registers the project without app Docker.
+- Process-mode lifecycle now shares PID/log/proxy metadata across CLI and
+  dashboard surfaces: `pier down` stops host processes and removes routes,
+  `pier down --all` includes registered process-mode projects, `pier logs`
+  tails `.pier/dev.log`, and the dashboard can start, stop, and restart
+  command-backed local processes through the same runtime path.
 
 ## Next Low-Level Closures
 
-1. Extend process runtime lifecycle coverage into `pier down`, `pier logs`, and
-   dashboard restart flows so process-mode projects are as operable as Docker
-   projects after launch.
-2. Decide how far process mode should go for docker-compose projects: keep app
+1. Decide how far process mode should go for docker-compose projects: keep app
    services on Docker by default, or map explicitly declared commands to host
    processes while reusing compose infra.
 

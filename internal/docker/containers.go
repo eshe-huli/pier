@@ -12,15 +12,15 @@ import (
 
 // ContainerInfo holds information about a container on the pier network
 type ContainerInfo struct {
-	ID          string
-	Name        string
-	Domain      string
-	Image       string
-	State       string
-	Status      string
+	ID             string
+	Name           string
+	Domain         string
+	Image          string
+	State          string
+	Status         string
 	ComposeProject string
 	ComposeService string
-	PierDomain  string
+	PierDomain     string
 }
 
 // ListContainers returns all containers on the pier network
@@ -44,10 +44,10 @@ func ListContainers(ctx context.Context, networkName string, tld string) ([]Cont
 		}
 
 		info := ContainerInfo{
-			ID:    c.ID[:12],
-			Name:  cleanName(c.Names),
-			Image: c.Image,
-			State: c.State,
+			ID:     c.ID[:12],
+			Name:   cleanName(c.Names),
+			Image:  c.Image,
+			State:  c.State,
 			Status: c.Status,
 		}
 

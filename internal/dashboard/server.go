@@ -9,14 +9,12 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/eshe-huli/pier/internal/config"
+	"github.com/eshe-huli/pier/internal/orchestrator"
 	"github.com/eshe-huli/pier/internal/registry"
 )
 
@@ -48,6 +46,7 @@ func Handler() http.Handler {
 	mux.HandleFunc("/api/services", handleServices)
 	mux.HandleFunc("/api/services/start", handleStartService)
 	mux.HandleFunc("/api/services/stop", handleStopService)
+	mux.HandleFunc("/api/services/restart", handleRestartService)
 	mux.HandleFunc("/api/projects", handleProjects)
 	mux.HandleFunc("/api/health", handleHealth)
 
@@ -271,7 +270,9 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"projects": projects})
 
 	case http.MethodDelete:
-		var req struct{ Name string `json:"name"` }
+		var req struct {
+			Name string `json:"name"`
+		}
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.Name == "" {
 			http.Error(w, `{"error":"name required"}`, 400)
@@ -302,85 +303,42 @@ func handleStartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try registry first, then legacy links dir
-	var meta config.LinkMeta
-	projects, _ := registry.Load()
-	found := false
-	for _, p := range projects {
-		if p.Name == req.Name {
-			meta = config.LinkMeta{Name: p.Name, Dir: p.Dir, Port: p.Port, Command: p.Command}
-			found = true
-			break
-		}
+	meta, found, err := orchestrator.ResolveLocalProcessMeta(req.Name)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), 500)
+		return
 	}
 	if !found {
-		metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
-		data, err := os.ReadFile(metaPath)
-		if err != nil {
-			http.Error(w, `{"error":"unknown service — register it first with pier link or pier up"}`, 404)
-			return
-		}
-		if err := json.Unmarshal(data, &meta); err != nil {
-			http.Error(w, `{"error":"corrupt link metadata"}`, 500)
-			return
-		}
+		http.Error(w, `{"error":"unknown service — register it first with pier link or pier up"}`, 404)
+		return
 	}
 
-	if meta.Command == "" {
+	if strings.TrimSpace(meta.Command) == "" {
 		http.Error(w, `{"error":"no dev command configured — start it manually"}`, 400)
 		return
 	}
 
 	// Check if already running
-	pidFile := filepath.Join(meta.Dir, ".pier", "dev.pid")
-	if pidData, err := os.ReadFile(pidFile); err == nil {
-		pid, _ := strconv.Atoi(strings.TrimSpace(string(pidData)))
-		if pid > 0 {
-			if proc, err := os.FindProcess(pid); err == nil {
-				if err := proc.Signal(syscall.Signal(0)); err == nil {
-					json.NewEncoder(w).Encode(map[string]interface{}{
-						"status": "already_running", "pid": pid,
-					})
-					return
-				}
-			}
-		}
-	}
-
-	// Start the dev server
-	pierDir := filepath.Join(meta.Dir, ".pier")
-	_ = os.MkdirAll(pierDir, 0755)
-	logFile := filepath.Join(pierDir, "dev.log")
-
-	log, err := os.Create(logFile)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"cannot create log: %s"}`, err), 500)
+	if pid, running := orchestrator.IsLocalProcessRunning(meta.Dir); running {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "already_running", "pid": pid,
+		})
 		return
 	}
 
-	parts := strings.Fields(meta.Command)
-	c := exec.Command(parts[0], parts[1:]...)
-	c.Dir = meta.Dir
-	c.Stdout = log
-	c.Stderr = log
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := c.Start(); err != nil {
-		log.Close()
+	cfg, err := config.Load()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), 500)
+		return
+	}
+	pid, logPath, err := orchestrator.StartLocalProcessMeta(meta, cfg)
+	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"failed to start: %s"}`, err), 500)
 		return
 	}
-	// Do NOT close log here — child process is still writing to it.
-	// Close it when the child exits.
-
-	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(c.Process.Pid)), 0644)
-	go func() {
-		_ = c.Wait()
-		log.Close()
-	}()
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "started", "pid": c.Process.Pid, "command": meta.Command,
+		"status": "started", "pid": pid, "command": meta.Command, "log": logPath,
 	})
 }
 
@@ -401,44 +359,77 @@ func handleStopService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find project dir from registry or legacy links
-	var projectDir string
-	projects, _ := registry.Load()
-	for _, p := range projects {
-		if p.Name == req.Name {
-			projectDir = p.Dir
-			break
-		}
-	}
-	if projectDir == "" {
-		metaPath := filepath.Join(config.LinksDir(), req.Name+".json")
-		data, err := os.ReadFile(metaPath)
-		if err != nil {
-			http.Error(w, `{"error":"unknown service"}`, 404)
-			return
-		}
-		var meta config.LinkMeta
-		if err := json.Unmarshal(data, &meta); err != nil {
-			http.Error(w, `{"error":"corrupt link metadata"}`, 500)
-			return
-		}
-		projectDir = meta.Dir
-	}
-
-	pidFile := filepath.Join(projectDir, ".pier", "dev.pid")
-	pidData, err := os.ReadFile(pidFile)
+	meta, found, err := orchestrator.ResolveLocalProcessMeta(req.Name)
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]string{"status": "not_running"})
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), 500)
+		return
+	}
+	if !found {
+		http.Error(w, `{"error":"unknown service"}`, 404)
 		return
 	}
 
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(pidData)))
-	if pid > 0 {
-		_ = syscall.Kill(-pid, syscall.SIGTERM)
+	stopped, err := orchestrator.StopLocalProcessMeta(meta)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"failed to stop: %s"}`, err), 500)
+		return
 	}
-	_ = os.Remove(pidFile)
+	status := "stopped"
+	if !stopped {
+		status = "not_running"
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": status})
+}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
+func handleRestartService(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, 405)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		http.Error(w, `{"error":"name required"}`, 400)
+		return
+	}
+
+	meta, found, err := orchestrator.ResolveLocalProcessMeta(req.Name)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), 500)
+		return
+	}
+	if !found {
+		http.Error(w, `{"error":"unknown service"}`, 404)
+		return
+	}
+	if strings.TrimSpace(meta.Command) == "" {
+		http.Error(w, `{"error":"no dev command configured — start it manually"}`, 400)
+		return
+	}
+
+	if _, err := orchestrator.StopLocalProcessMeta(meta); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"failed to stop: %s"}`, err), 500)
+		return
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), 500)
+		return
+	}
+	pid, logPath, err := orchestrator.StartLocalProcessMeta(meta, cfg)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"failed to start: %s"}`, err), 500)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "restarted", "pid": pid, "command": meta.Command, "log": logPath,
+	})
 }
 
 func extractDomain(rule string) string {

@@ -275,6 +275,91 @@ func TestLocalProcessRunAppCreatesProxyAndRegistryWithoutCommand(t *testing.T) {
 	}
 }
 
+func TestLocalProcessMetaResolutionAndLogs(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := registry.Register(registry.Project{
+		Name:    "api",
+		Dir:     dir,
+		Port:    4173,
+		Command: "npm run dev",
+		Type:    "linked",
+	}); err != nil {
+		t.Fatalf("registering project: %v", err)
+	}
+
+	meta, found, err := ResolveLocalProcessMeta("api")
+	if err != nil {
+		t.Fatalf("ResolveLocalProcessMeta returned error: %v", err)
+	}
+	if !found {
+		t.Fatal("ResolveLocalProcessMeta did not find api")
+	}
+	if meta.Dir != dir || meta.Port != 4173 || meta.Command != "npm run dev" {
+		t.Fatalf("meta = %#v", meta)
+	}
+
+	metas, err := ListLocalProcessMetas()
+	if err != nil {
+		t.Fatalf("ListLocalProcessMetas returned error: %v", err)
+	}
+	if len(metas) != 1 || metas[0].Name != "api" {
+		t.Fatalf("metas = %#v", metas)
+	}
+
+	if got := LocalProcessLogPath(dir); got != filepath.Join(dir, ".pier", "dev.log") {
+		t.Fatalf("LocalProcessLogPath() = %q", got)
+	}
+}
+
+func TestStartAndStopLocalProcessMeta(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	t.Setenv("HOME", home)
+
+	meta := config.LinkMeta{
+		Name:    "api",
+		Dir:     dir,
+		Port:    4333,
+		Command: "while true; do sleep 1; done",
+	}
+
+	pid, logPath, err := StartLocalProcessMeta(meta, &config.Config{TLD: "dock"})
+	if err != nil {
+		t.Fatalf("StartLocalProcessMeta returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = StopLocalProcessMeta(meta)
+	})
+
+	if pid <= 0 {
+		t.Fatalf("pid = %d", pid)
+	}
+	if logPath != filepath.Join(dir, ".pier", "dev.log") {
+		t.Fatalf("logPath = %q", logPath)
+	}
+	if gotPID, running := IsLocalProcessRunning(dir); !running || gotPID != pid {
+		t.Fatalf("IsLocalProcessRunning() = %d/%t, want %d/true", gotPID, running, pid)
+	}
+	proxyFile := filepath.Join(home, ".pier", "traefik", "dynamic", "api.yaml")
+	if _, err := os.Stat(proxyFile); err != nil {
+		t.Fatalf("expected proxy file: %v", err)
+	}
+
+	stopped, err := StopLocalProcessMeta(meta)
+	if err != nil {
+		t.Fatalf("StopLocalProcessMeta returned error: %v", err)
+	}
+	if !stopped {
+		t.Fatal("StopLocalProcessMeta reported not stopped")
+	}
+	if _, running := IsLocalProcessRunning(dir); running {
+		t.Fatal("process still running after stop")
+	}
+}
+
 func TestLocalProcessEnvMergesRuntimeAndAppEnv(t *testing.T) {
 	got := localProcessEnv(
 		[]string{"PATH=/bin", "PORT=1000", "DATABASE_URL=old"},

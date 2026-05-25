@@ -25,10 +25,10 @@ type SharedService struct {
 
 // ServiceDef defines a supported infrastructure service
 type ServiceDef struct {
-	Image    func(version string) string
-	Port     int
-	EnvVars  map[string]string
-	RunArgs  func(version string) []string // extra docker run args
+	Image   func(version string) string
+	Port    int
+	EnvVars map[string]string
+	RunArgs func(version string) []string // extra docker run args
 }
 
 var serviceDefs = map[string]ServiceDef{

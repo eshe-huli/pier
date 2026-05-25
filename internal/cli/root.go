@@ -13,12 +13,12 @@ var Version = "0.2.0"
 
 var (
 	// Colors
-	green   = color.New(color.FgGreen).SprintFunc()
-	red     = color.New(color.FgRed).SprintFunc()
-	yellow  = color.New(color.FgYellow).SprintFunc()
-	cyan    = color.New(color.FgCyan).SprintFunc()
-	bold    = color.New(color.Bold).SprintFunc()
-	dim     = color.New(color.Faint).SprintFunc()
+	green  = color.New(color.FgGreen).SprintFunc()
+	red    = color.New(color.FgRed).SprintFunc()
+	yellow = color.New(color.FgYellow).SprintFunc()
+	cyan   = color.New(color.FgCyan).SprintFunc()
+	bold   = color.New(color.Bold).SprintFunc()
+	dim    = color.New(color.Faint).SprintFunc()
 )
 
 var rootCmd = &cobra.Command{

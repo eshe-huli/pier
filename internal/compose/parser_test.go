@@ -44,10 +44,10 @@ func TestParse_NoComposeFile(t *testing.T) {
 func TestSeparateServices_InfraVsApp(t *testing.T) {
 	cf := &ComposeFile{
 		Services: map[string]ComposeService{
-			"api": {Build: "./api", Ports: []string{"3000:3000"}},
-			"db":  {Image: "postgres:16"},
+			"api":   {Build: "./api", Ports: []string{"3000:3000"}},
+			"db":    {Image: "postgres:16"},
 			"redis": {Image: "redis:7-alpine"},
-			"web": {Build: "./web", Ports: []string{"5173:5173"}},
+			"web":   {Build: "./web", Ports: []string{"5173:5173"}},
 		},
 	}
 

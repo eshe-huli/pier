@@ -88,7 +88,10 @@ function renderServices(services) {
         if (isLinked && !isUp) {
             actionBtn = `<button class="btn-launch" onclick="launchService('${esc(svc.name)}')" title="Launch">▶ Launch</button>`;
         } else if (isLinked && isUp) {
-            actionBtn = `<button class="btn-stop" onclick="stopService('${esc(svc.name)}')" title="Stop">■ Stop</button>`;
+            actionBtn = `
+                <button class="btn-launch" onclick="restartService('${esc(svc.name)}')" title="Restart">↻ Restart</button>
+                <button class="btn-stop" onclick="stopService('${esc(svc.name)}')" title="Stop">■ Stop</button>
+            `;
         }
 
         const dirLabel = svc.dir ? `<div class="service-dir" title="${esc(svc.dir)}">${esc(shortenPath(svc.dir))}</div>` : '';
@@ -179,6 +182,24 @@ async function stopService(name) {
         setTimeout(loadServices, 500);
     } catch (err) {
         alert('Failed to stop service: ' + err.message);
+    }
+}
+
+async function restartService(name) {
+    try {
+        const resp = await fetch('/api/services/restart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        if (!resp.ok) {
+            const data = await resp.json();
+            alert(data.error || 'Failed to restart');
+            return;
+        }
+        setTimeout(loadServices, 2000);
+    } catch (err) {
+        alert('Failed to restart service: ' + err.message);
     }
 }
 

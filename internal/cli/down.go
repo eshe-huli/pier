@@ -12,6 +12,7 @@ import (
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/docker"
 	"github.com/eshe-huli/pier/internal/infra"
+	"github.com/eshe-huli/pier/internal/orchestrator"
 	"github.com/eshe-huli/pier/internal/pierfile"
 	"github.com/eshe-huli/pier/internal/proxy"
 )
@@ -77,6 +78,21 @@ func runDown(cmd *cobra.Command, args []string) error {
 		info(fmt.Sprintf("Container %s is not running", name))
 	}
 
+	if meta, found, err := orchestrator.ResolveLocalProcessMeta(name); err != nil {
+		return err
+	} else if found {
+		stopped, err := orchestrator.StopLocalProcessMeta(meta)
+		if err != nil {
+			fail(fmt.Sprintf("Failed to stop local process: %s", err))
+			return err
+		}
+		if stopped {
+			success(fmt.Sprintf("Local process %s stopped", bold(name)))
+		} else {
+			info(fmt.Sprintf("Local process %s is not running", name))
+		}
+	}
+
 	// Remove Traefik route
 	if proxy.FileProxyExists(name) {
 		if err := proxy.RemoveFileProxy(name); err != nil {
@@ -140,8 +156,28 @@ func runDownAll(ctx context.Context) error {
 		}
 	}
 
+	step(3, "Stopping local processes...")
+	localProcesses, err := orchestrator.ListLocalProcessMetas()
+	if err != nil {
+		return err
+	}
+	for _, meta := range localProcesses {
+		if meta.Name == "" {
+			continue
+		}
+		fmt.Printf("    → %s ", cyan(meta.Name))
+		if _, err := orchestrator.StopLocalProcessMeta(meta); err != nil {
+			fmt.Println(red("✗"))
+		} else {
+			fmt.Println(green("✓"))
+		}
+		if proxy.FileProxyExists(meta.Name) {
+			_ = proxy.RemoveFileProxy(meta.Name)
+		}
+	}
+
 	// Stop Traefik
-	step(3, "Stopping Traefik...")
+	step(4, "Stopping Traefik...")
 	if proxy.IsTraefikRunning(ctx) {
 		if err := proxy.StopTraefik(ctx); err != nil {
 			fail(fmt.Sprintf("Failed to stop Traefik: %s", err))

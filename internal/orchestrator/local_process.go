@@ -226,8 +226,8 @@ func startLocalProcess(spec AppSpec, command string, port int, envOverrides []st
 		return 0, "", fmt.Errorf("creating .pier directory: %w", err)
 	}
 
-	pidFile := filepath.Join(pierDir, "dev.pid")
-	logFile := filepath.Join(pierDir, "dev.log")
+	pidFile := LocalProcessPIDFile(spec.Dir)
+	logFile := LocalProcessLogPath(spec.Dir)
 	killExistingLocalProcess(pidFile)
 
 	log, err := os.Create(logFile)
@@ -259,6 +259,163 @@ func startLocalProcess(spec AppSpec, command string, port int, envOverrides []st
 	}()
 
 	return cmd.Process.Pid, logFile, nil
+}
+
+// LocalProcessPIDFile returns the managed PID file for a host-process project.
+func LocalProcessPIDFile(dir string) string {
+	return filepath.Join(dir, ".pier", "dev.pid")
+}
+
+// LocalProcessLogPath returns the managed log file for a host-process project.
+func LocalProcessLogPath(dir string) string {
+	return filepath.Join(dir, ".pier", "dev.log")
+}
+
+// ResolveLocalProcessMeta looks up the process/proxy metadata for a known project.
+func ResolveLocalProcessMeta(name string) (config.LinkMeta, bool, error) {
+	projects, err := registry.Load()
+	if err != nil {
+		return config.LinkMeta{}, false, fmt.Errorf("loading registry: %w", err)
+	}
+	for _, project := range projects {
+		if project.Name == name && isLocalProcessProject(project) {
+			return config.LinkMeta{
+				Name:    project.Name,
+				Dir:     project.Dir,
+				Port:    project.Port,
+				Command: project.Command,
+			}, true, nil
+		}
+	}
+
+	meta, found, err := readLegacyLinkMeta(name)
+	if err != nil {
+		return config.LinkMeta{}, false, err
+	}
+	return meta, found, nil
+}
+
+// ListLocalProcessMetas returns deduplicated process/proxy metadata.
+func ListLocalProcessMetas() ([]config.LinkMeta, error) {
+	seen := map[string]bool{}
+	var metas []config.LinkMeta
+
+	projects, err := registry.Load()
+	if err != nil {
+		return nil, fmt.Errorf("loading registry: %w", err)
+	}
+	for _, project := range projects {
+		if !isLocalProcessProject(project) || project.Name == "" {
+			continue
+		}
+		seen[project.Name] = true
+		metas = append(metas, config.LinkMeta{
+			Name:    project.Name,
+			Dir:     project.Dir,
+			Port:    project.Port,
+			Command: project.Command,
+		})
+	}
+
+	entries, err := os.ReadDir(config.LinksDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return metas, nil
+		}
+		return nil, fmt.Errorf("reading links directory: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		if seen[name] {
+			continue
+		}
+		meta, found, err := readLegacyLinkMeta(name)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			seen[name] = true
+			metas = append(metas, meta)
+		}
+	}
+
+	sort.Slice(metas, func(i, j int) bool {
+		return metas[i].Name < metas[j].Name
+	})
+	return metas, nil
+}
+
+// IsLocalProcessRunning checks whether the managed PID still points at a process.
+func IsLocalProcessRunning(dir string) (int, bool) {
+	data, err := os.ReadFile(LocalProcessPIDFile(dir))
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	if err := syscall.Kill(pid, 0); err != nil {
+		return pid, false
+	}
+	return pid, true
+}
+
+// StartLocalProcessMeta starts a registered host-process project and restores its route.
+func StartLocalProcessMeta(meta config.LinkMeta, cfg *config.Config) (int, string, error) {
+	if meta.Name == "" {
+		return 0, "", fmt.Errorf("process metadata is missing name")
+	}
+	if meta.Dir == "" {
+		return 0, "", fmt.Errorf("process metadata for %s is missing directory", meta.Name)
+	}
+	if meta.Port == 0 {
+		return 0, "", fmt.Errorf("process metadata for %s is missing port", meta.Name)
+	}
+	if strings.TrimSpace(meta.Command) == "" {
+		return 0, "", fmt.Errorf("process metadata for %s has no command; start it manually on port %d", meta.Name, meta.Port)
+	}
+
+	if err := os.MkdirAll(config.TraefikDynamicDir(), 0755); err != nil {
+		return 0, "", fmt.Errorf("creating proxy config directory: %w", err)
+	}
+	if proxy.FileProxyExists(meta.Name) {
+		_ = proxy.RemoveFileProxy(meta.Name)
+	}
+	if err := proxy.CreateFileProxy(meta.Name, meta.Port, cfg.TLD); err != nil {
+		return 0, "", fmt.Errorf("creating process proxy: %w", err)
+	}
+
+	return startLocalProcess(AppSpec{Name: meta.Name, Dir: meta.Dir, Port: meta.Port}, meta.Command, meta.Port, nil)
+}
+
+// StopLocalProcessMeta stops the process group for a registered host-process project.
+func StopLocalProcessMeta(meta config.LinkMeta) (bool, error) {
+	if meta.Dir == "" {
+		return false, fmt.Errorf("process metadata for %s is missing directory", meta.Name)
+	}
+	pidFile := LocalProcessPIDFile(meta.Dir)
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading process pid file: %w", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		_ = os.Remove(pidFile)
+		return false, fmt.Errorf("invalid process pid for %s", meta.Name)
+	}
+
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
+		return false, fmt.Errorf("stopping local process %s: %w", meta.Name, err)
+	}
+	_ = os.Remove(pidFile)
+	return true, nil
 }
 
 func killExistingLocalProcess(pidFile string) {
@@ -351,4 +508,32 @@ func saveLocalProcessMeta(name, dir string, port int, command string, framework 
 	}
 
 	return nil
+}
+
+func isLocalProcessProject(project registry.Project) bool {
+	switch project.Type {
+	case "linked", "proxy", "process":
+		return true
+	default:
+		return project.Command != ""
+	}
+}
+
+func readLegacyLinkMeta(name string) (config.LinkMeta, bool, error) {
+	metaPath := filepath.Join(config.LinksDir(), name+".json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return config.LinkMeta{}, false, nil
+		}
+		return config.LinkMeta{}, false, fmt.Errorf("reading link metadata: %w", err)
+	}
+	var meta config.LinkMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return config.LinkMeta{}, false, fmt.Errorf("parsing link metadata: %w", err)
+	}
+	if meta.Name == "" {
+		meta.Name = name
+	}
+	return meta, true, nil
 }

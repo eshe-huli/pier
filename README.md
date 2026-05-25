@@ -69,8 +69,9 @@ pier doctor                  # Diagnose issues with fix suggestions
 pier dashboard               # Open Traefik dashboard in browser
 pier up --dry-run            # Preview what Pier would run without side effects
 pier up --runtime process    # Run/link the project as a local process
+pier logs myapp              # Tail Docker or process-runtime logs
 pier run api --image node:20 --dry-run
-pier down                    # Stop Pier infrastructure
+pier down myapp              # Stop Docker or process-runtime project
 pier restart                 # Restart everything
 pier config                  # View configuration
 pier config set tld loc      # Change TLD from .dock to .loc
@@ -199,12 +200,13 @@ Different TLDs, different nginx server blocks. No conflicts.
 | `pier up --dry-run` | Preview the detected app/services/domains without touching Docker or project files |
 | `pier up --runtime process` | Start or link the detected app as a host process behind a `.dock` route |
 | `pier run <name> --image <image> --dry-run` | Preview an ad hoc Docker run plan without starting infra |
+| `pier logs <name>` | Show Docker logs or tail `.pier/dev.log` for process-runtime projects |
 | `pier proxy <name> <port>` | Route `<name>.dock` → `localhost:<port>` |
 | `pier unproxy <name>` | Remove a bare-metal proxy route |
 | `pier status` | System health check |
 | `pier doctor` | Diagnose issues with suggested fixes |
 | `pier dashboard` | Open Traefik dashboard in browser |
-| `pier down` | Stop Pier infrastructure |
+| `pier down [name]` | Stop Docker or process-runtime project; `--all` stops projects, local processes, infra, and Traefik |
 | `pier restart` | Restart Pier infrastructure |
 | `pier config` | View current configuration |
 | `pier config get <key>` | Get a config value |

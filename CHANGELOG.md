@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pier up --runtime process` to execute the planner's app route as a host
   process behind a file-provider `.dock` proxy while preserving Docker as the
   default runtime.
+- Process-runtime lifecycle support for `pier down`, `pier logs`, and
+  dashboard start/stop/restart actions, all backed by shared PID, log, proxy,
+  and registry metadata.
 - Runtime adapter boundary in the shared orchestrator, with Docker as the
   default adapter for `pier up` and `pier run`.
 - `pier up --dry-run` and `pier run --dry-run` preview Pier's app, service,
