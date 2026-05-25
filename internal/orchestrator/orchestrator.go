@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/eshe-huli/pier/internal/config"
@@ -19,16 +20,24 @@ import (
 
 // AppSpec describes what to build and run.
 type AppSpec struct {
-	Name        string
-	Dir         string
-	Image       string            // Pre-built image (skip build if set)
-	BuildCtx    string            // Build context path
-	Dockerfile  string            // Explicit Dockerfile path (empty = auto-detect)
-	Port        int               // Container port
-	Env         map[string]string // Extra env vars
-	Volumes     []string          // Volume mounts
-	Entrypoint  interface{}       // Override entrypoint
-	Command     interface{}       // Override CMD
+	Name                    string
+	Dir                     string
+	Image                   string            // Image tag to build or prebuilt image to run
+	Prebuilt                bool              // Skip docker build and use Image directly
+	BuildCtx                string            // Build context path
+	Dockerfile              string            // Explicit Dockerfile path (empty = auto-detect)
+	GeneratedDockerfileName string            // Name under .pier/ when auto-generating
+	Framework               *detect.Framework // Framework fallback from the planner
+	Port                    int               // Container port
+	Env                     map[string]string // Extra env vars
+	ExtraEnv                []string          // Ordered extra env vars
+	EnvFile                 string            // Optional --env-file path
+	RuntimeEnvLast          bool              // Append env overrides after app env
+	Volumes                 []string          // Volume mounts
+	Entrypoint              interface{}       // Override entrypoint
+	Command                 interface{}       // Override CMD
+	Route                   bool              // Add Traefik labels
+	RegisterType            string            // Registry type, defaults to docker
 }
 
 // Result holds the outcome of an orchestrated run.
@@ -40,11 +49,14 @@ type Result struct {
 
 // BuildImage builds a Docker image for the app. Returns the image name.
 func BuildImage(ctx context.Context, spec AppSpec) (string, int, error) {
-	imageName := spec.Name
+	imageName := spec.Image
+	if imageName == "" {
+		imageName = spec.Name
+	}
 	port := spec.Port
 
-	if spec.Image != "" {
-		return spec.Image, port, nil
+	if spec.Prebuilt {
+		return imageName, port, nil
 	}
 
 	buildCtx := spec.Dir
@@ -61,8 +73,16 @@ func BuildImage(ctx context.Context, spec AppSpec) (string, int, error) {
 	}
 
 	// If no Dockerfile, auto-detect framework and generate one
-	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
-		fw, fwErr := detect.DetectFramework(spec.Dir)
+	if _, err := os.Stat(dockerfile); err != nil {
+		if !os.IsNotExist(err) {
+			return "", 0, fmt.Errorf("checking Dockerfile: %w", err)
+		}
+
+		fw, fwErr := detect.DetectFramework(buildCtx)
+		if fwErr != nil && spec.Framework != nil && filepath.Clean(buildCtx) == filepath.Clean(spec.Dir) {
+			fw = spec.Framework
+			fwErr = nil
+		}
 		if fwErr != nil {
 			return "", 0, fmt.Errorf("no Dockerfile found and could not detect framework: %w", fwErr)
 		}
@@ -79,12 +99,16 @@ func BuildImage(ctx context.Context, spec AppSpec) (string, int, error) {
 		if err := os.MkdirAll(pierDir, 0755); err != nil {
 			return "", 0, fmt.Errorf("creating .pier directory: %w", err)
 		}
-		dockerfile = filepath.Join(pierDir, "Dockerfile")
+		genName := spec.GeneratedDockerfileName
+		if genName == "" {
+			genName = "Dockerfile"
+		}
+		dockerfile = filepath.Join(pierDir, genName)
 		if err := os.WriteFile(dockerfile, []byte(tmpl), 0644); err != nil {
 			return "", 0, fmt.Errorf("writing generated Dockerfile: %w", err)
 		}
 	} else if port == 0 {
-		if fw, fwErr := detect.DetectFramework(spec.Dir); fwErr == nil {
+		if fw, fwErr := detect.DetectFramework(buildCtx); fwErr == nil {
 			port = fw.Port
 		}
 	}
@@ -146,37 +170,45 @@ func EnsureInfra(ctx context.Context, services []string, projectName string) ([]
 	return shared, envOverrides, dbCreated, nil
 }
 
-// RunContainer stops the old container, starts a new one with Traefik labels, and registers it.
-func RunContainer(ctx context.Context, spec AppSpec, image string, port int, cfg *config.Config, envOverrides []string) error {
-	// Stop old container
-	if err := docker.StopAndRemoveContainer(ctx, spec.Name); err != nil {
-		// Non-fatal, container might not exist
+// Domain returns the app domain for the configured Pier TLD.
+func (spec AppSpec) Domain(tld string) string {
+	tld = strings.TrimPrefix(tld, ".")
+	if tld == "" {
+		return spec.Name
 	}
+	return fmt.Sprintf("%s.%s", spec.Name, tld)
+}
 
+// DockerRunArgs returns deterministic docker run arguments for an app spec.
+func DockerRunArgs(spec AppSpec, image string, port int, cfg *config.Config, envOverrides []string) []string {
 	dockerArgs := []string{"run", "-d", "--name", spec.Name, "--network", cfg.Network, "--restart", "unless-stopped"}
 
-	// Env overrides from shared services
-	for _, e := range envOverrides {
-		dockerArgs = append(dockerArgs, "-e", e)
+	if spec.EnvFile != "" {
+		dockerArgs = append(dockerArgs, "--env-file", spec.EnvFile)
 	}
 
-	// App-specific env
-	for k, v := range spec.Env {
-		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
+	if spec.RuntimeEnvLast {
+		dockerArgs = appendEnvMap(dockerArgs, spec.Env)
+		dockerArgs = appendExtraEnv(dockerArgs, spec.ExtraEnv)
+		dockerArgs = appendEnvList(dockerArgs, envOverrides)
+	} else {
+		dockerArgs = appendEnvList(dockerArgs, envOverrides)
+		dockerArgs = appendEnvMap(dockerArgs, spec.Env)
+		dockerArgs = appendExtraEnv(dockerArgs, spec.ExtraEnv)
 	}
 
-	// Traefik labels
-	dockerArgs = append(dockerArgs,
-		"-l", "traefik.enable=true",
-		"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", spec.Name, spec.Name, cfg.TLD),
-	)
-	if port > 0 {
+	if spec.Route {
 		dockerArgs = append(dockerArgs,
-			"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", spec.Name, port),
+			"-l", "traefik.enable=true",
+			"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", spec.Name, spec.Domain(cfg.TLD)),
 		)
+		if port > 0 {
+			dockerArgs = append(dockerArgs,
+				"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", spec.Name, port),
+			)
+		}
 	}
 
-	// Volumes
 	for _, v := range spec.Volumes {
 		if strings.Contains(v, ":") {
 			parts := strings.SplitN(v, ":", 3)
@@ -189,41 +221,22 @@ func RunContainer(ctx context.Context, spec AppSpec, image string, port int, cfg
 		}
 	}
 
-	// Entrypoint override
-	if spec.Entrypoint != nil {
-		switch ep := spec.Entrypoint.(type) {
-		case string:
-			dockerArgs = append(dockerArgs, "--entrypoint", ep)
-		case []interface{}:
-			if len(ep) > 0 {
-				dockerArgs = append(dockerArgs, "--entrypoint", fmt.Sprintf("%v", ep[0]))
-			}
-		}
-	}
-
+	dockerArgs = appendEntrypointOverride(dockerArgs, spec.Entrypoint)
 	dockerArgs = append(dockerArgs, image)
+	dockerArgs = appendEntrypointArgs(dockerArgs, spec.Entrypoint)
+	dockerArgs = appendCommandOverride(dockerArgs, spec.Command)
 
-	// Entrypoint args (remaining elements)
-	if spec.Entrypoint != nil {
-		if ep, ok := spec.Entrypoint.([]interface{}); ok && len(ep) > 1 {
-			for _, e := range ep[1:] {
-				dockerArgs = append(dockerArgs, fmt.Sprintf("%v", e))
-			}
-		}
+	return dockerArgs
+}
+
+// RunContainer stops the old container, starts a new one, and registers it.
+func RunContainer(ctx context.Context, spec AppSpec, image string, port int, cfg *config.Config, envOverrides []string) error {
+	// Stop old container
+	if err := docker.StopAndRemoveContainer(ctx, spec.Name); err != nil {
+		// Non-fatal, container might not exist
 	}
 
-	// Command override
-	if spec.Command != nil {
-		switch cmd := spec.Command.(type) {
-		case string:
-			dockerArgs = append(dockerArgs, cmd)
-		case []interface{}:
-			for _, c := range cmd {
-				dockerArgs = append(dockerArgs, fmt.Sprintf("%v", c))
-			}
-		}
-	}
-
+	dockerArgs := DockerRunArgs(spec, image, port, cfg, envOverrides)
 	dockerCmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	out, err := dockerCmd.CombinedOutput()
 	if err != nil {
@@ -233,9 +246,84 @@ func RunContainer(ctx context.Context, spec AppSpec, image string, port int, cfg
 	// File proxy backup — caller should handle this via cli createContainerProxy
 
 	// Register project
-	if err := registry.Register(registry.Project{Name: spec.Name, Dir: spec.Dir, Type: "docker"}); err != nil {
+	registerType := spec.RegisterType
+	if registerType == "" {
+		registerType = "docker"
+	}
+	if err := registry.Register(registry.Project{Name: spec.Name, Dir: spec.Dir, Port: port, Type: registerType}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not register project: %v\n", err)
 	}
 
 	return nil
+}
+
+func appendEnvList(args []string, envs []string) []string {
+	for _, env := range envs {
+		args = append(args, "-e", env)
+	}
+	return args
+}
+
+func appendEnvMap(args []string, env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", key, env[key]))
+	}
+	return args
+}
+
+func appendExtraEnv(args []string, envs []string) []string {
+	for _, env := range envs {
+		args = append(args, "-e", env)
+	}
+	return args
+}
+
+func appendEntrypointOverride(args []string, entrypoint interface{}) []string {
+	if entrypoint == nil {
+		return args
+	}
+
+	switch ep := entrypoint.(type) {
+	case string:
+		return append(args, "--entrypoint", ep)
+	case []interface{}:
+		if len(ep) > 0 {
+			return append(args, "--entrypoint", fmt.Sprintf("%v", ep[0]))
+		}
+	}
+	return args
+}
+
+func appendEntrypointArgs(args []string, entrypoint interface{}) []string {
+	ep, ok := entrypoint.([]interface{})
+	if !ok || len(ep) <= 1 {
+		return args
+	}
+
+	for _, item := range ep[1:] {
+		args = append(args, fmt.Sprintf("%v", item))
+	}
+	return args
+}
+
+func appendCommandOverride(args []string, command interface{}) []string {
+	if command == nil {
+		return args
+	}
+
+	switch cmd := command.(type) {
+	case string:
+		args = append(args, cmd)
+	case []interface{}:
+		for _, item := range cmd {
+			args = append(args, fmt.Sprintf("%v", item))
+		}
+	}
+	return args
 }

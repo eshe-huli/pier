@@ -3,15 +3,14 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/infra"
+	"github.com/eshe-huli/pier/internal/orchestrator"
 	"github.com/eshe-huli/pier/internal/proxy"
-	"github.com/eshe-huli/pier/internal/registry"
 	"github.com/eshe-huli/pier/internal/runtime"
 )
 
@@ -47,6 +46,10 @@ func init() {
 
 func runRunCmd(cmd *cobra.Command, args []string) error {
 	name := args[0]
+	dir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting working directory: %w", err)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -57,12 +60,18 @@ func runRunCmd(cmd *cobra.Command, args []string) error {
 	image := runImage
 	if runBuild {
 		step(1, fmt.Sprintf("Building image %s...", cyan(name)))
-		buildCmd := exec.Command("docker", "build", "-t", name, ".")
-		buildCmd.Stdout = os.Stdout
-		buildCmd.Stderr = os.Stderr
-		if err := buildCmd.Run(); err != nil {
-			return fmt.Errorf("docker build failed: %w", err)
+		var port int
+		image, port, err = orchestrator.BuildImage(cmd.Context(), orchestrator.AppSpec{
+			Name:     name,
+			Dir:      dir,
+			Image:    name,
+			BuildCtx: dir,
+			Port:     runPort,
+		})
+		if err != nil {
+			return err
 		}
+		runPort = port
 		image = name
 		success("Image built")
 	}
@@ -107,25 +116,16 @@ func runRunCmd(cmd *cobra.Command, args []string) error {
 
 	// Step 5: Run the container
 	step(3, fmt.Sprintf("Running %s...", cyan(name)))
-
-	dockerArgs := []string{"run", "-d", "--name", name, "--network", cfg.Network, "--restart", "unless-stopped"}
-
-	// Add env overrides from shared services
-	for _, e := range envOverrides {
-		dockerArgs = append(dockerArgs, "-e", e)
-	}
-
-	// Add user-specified env vars
-	for _, e := range runEnvs {
-		dockerArgs = append(dockerArgs, "-e", e)
-	}
-
-	dockerArgs = append(dockerArgs, image)
-
-	dockerCmd := exec.Command("docker", dockerArgs...)
-	out, err := dockerCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker run failed: %s\n%s", err, string(out))
+	if err := orchestrator.RunContainer(cmd.Context(), orchestrator.AppSpec{
+		Name:         name,
+		Dir:          dir,
+		Image:        image,
+		Prebuilt:     true,
+		Port:         runPort,
+		ExtraEnv:     runEnvs,
+		RegisterType: "run",
+	}, image, runPort, cfg, envOverrides); err != nil {
+		return err
 	}
 
 	success(fmt.Sprintf("Container %s started", bold(name)))
@@ -141,15 +141,6 @@ func runRunCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Register in project registry
-	dir, _ := os.Getwd()
-	_ = registry.Register(registry.Project{
-		Name: name,
-		Dir:  dir,
-		Port: runPort,
-		Type: "run",
-	})
-
 	fmt.Println()
 	return nil
 }
@@ -163,8 +154,8 @@ func createContainerProxy(name string, port int, tld string) error {
 		"http": map[string]interface{}{
 			"routers": map[string]interface{}{
 				name: map[string]interface{}{
-					"rule":    fmt.Sprintf("Host(`%s`)", domain),
-					"service": name,
+					"rule":        fmt.Sprintf("Host(`%s`)", domain),
+					"service":     name,
 					"entryPoints": []string{"web"},
 				},
 			},

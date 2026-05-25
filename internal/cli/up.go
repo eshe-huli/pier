@@ -4,17 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/eshe-huli/pier/internal/config"
-	"github.com/eshe-huli/pier/internal/detect"
-	"github.com/eshe-huli/pier/internal/docker"
 	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/infra"
+	"github.com/eshe-huli/pier/internal/orchestrator"
 	"github.com/eshe-huli/pier/internal/planner"
 	"github.com/eshe-huli/pier/internal/registry"
 	"github.com/eshe-huli/pier/internal/runtime"
@@ -168,73 +165,37 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 
 	// Build and run app services
 	for i, app := range apps {
+		spec := appSpecFromPlan(runPlan, app)
+		spec.RuntimeEnvLast = true
+		spec.Route = true
+		spec.RegisterType = "docker"
+		if app.UseEnvFile && pierEnvFile != "" {
+			spec.EnvFile = pierEnvFile
+		}
+
+		image := spec.Image
+		port := spec.Port
 		if app.BuildContext != "" {
 			step(3+i, fmt.Sprintf("Building %s...", cyan(app.Name)))
-			if err := buildAppImage(runPlan, app); err != nil {
+			var err error
+			image, port, err = orchestrator.BuildImage(ctx, spec)
+			if err != nil {
 				return fmt.Errorf("building %s: %w", app.Name, err)
 			}
 			success("Image built")
 		}
-
-		image := app.Image
 		if image == "" {
 			image = app.Name
 		}
 
-		// Stop old
-		_ = docker.StopAndRemoveContainer(ctx, app.Name)
-
 		// Run
-		dockerArgs := []string{"run", "-d", "--name", app.Name, "--network", cfg.Network, "--restart", "unless-stopped"}
-		domain := app.Domain(cfg.TLD)
-
-		// For built apps: use .pier/env file (clean, no baked-in env)
-		// For sidecars (image-only): pass env vars individually
-		if app.UseEnvFile && pierEnvFile != "" {
-			dockerArgs = append(dockerArgs, "--env-file", pierEnvFile)
-		}
-
-		// Compose environment vars (lower priority)
-		for k, v := range app.Env {
-			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
-		}
-
-		// Pier env overrides (highest priority)
-		for _, e := range envOverrides {
-			dockerArgs = append(dockerArgs, "-e", e)
-		}
-
-		// Traefik labels
-		dockerArgs = append(dockerArgs,
-			"-l", "traefik.enable=true",
-			"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", app.Name, domain),
-		)
-		if app.Port > 0 {
-			dockerArgs = append(dockerArgs,
-				"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", app.Name, app.Port),
-			)
-		}
-
-		// Volumes are resolved by the planner.
-		for _, v := range app.Volumes {
-			dockerArgs = append(dockerArgs, "-v", v)
-		}
-
-		dockerArgs = appendEntrypointOverride(dockerArgs, app.Entrypoint)
-
-		dockerArgs = append(dockerArgs, image)
-		dockerArgs = appendEntrypointArgs(dockerArgs, app.Entrypoint)
-		dockerArgs = appendCommandOverride(dockerArgs, app.Command)
-
-		dockerCmd := exec.Command("docker", dockerArgs...)
-		out, err := dockerCmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("running %s: %s\n%s", app.Name, err, string(out))
+		if err := orchestrator.RunContainer(ctx, spec, image, port, cfg, envOverrides); err != nil {
+			return fmt.Errorf("running %s: %w", app.Name, err)
 		}
 
 		// File proxy backup
-		if app.Port > 0 {
-			_ = createContainerProxy(app.Name, app.Port, cfg.TLD)
+		if port > 0 {
+			_ = createContainerProxy(app.Name, port, cfg.TLD)
 		}
 	}
 
@@ -281,45 +242,27 @@ func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, 
 	}
 
 	projectName := runPlan.ProjectName
+	spec := appSpecFromPlan(runPlan, app)
 	step(3, "Building application...")
-	if err := buildAppImage(runPlan, app); err != nil {
+	image, port, err := orchestrator.BuildImage(ctx, spec)
+	if err != nil {
 		return err
 	}
 	success("Image built")
 
-	_ = docker.StopAndRemoveContainer(ctx, app.Name)
-
 	step(4, fmt.Sprintf("Starting %s...", cyan(app.Name)))
 	envOverrides := planner.RuntimeEnv(projectName, runtime.BuildEnvOverrides(sharedServices))
-	dockerArgs := []string{"run", "-d", "--name", app.Name, "--network", cfg.Network, "--restart", "unless-stopped"}
-	domain := app.Domain(cfg.TLD)
-	for _, e := range envOverrides {
-		dockerArgs = append(dockerArgs, "-e", e)
-	}
-	for k, v := range app.Env {
-		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
-	}
-	dockerArgs = append(dockerArgs,
-		"-l", "traefik.enable=true",
-		"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", app.Name, domain),
-	)
-	if app.Port > 0 {
-		dockerArgs = append(dockerArgs,
-			"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", app.Name, app.Port),
-		)
-	}
-	dockerArgs = append(dockerArgs, app.Image)
-
-	dockerCmd := exec.Command("docker", dockerArgs...)
-	out, err := dockerCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker run failed: %s\n%s", err, string(out))
+	spec.Route = true
+	spec.RegisterType = "docker"
+	if err := orchestrator.RunContainer(ctx, spec, image, port, cfg, envOverrides); err != nil {
+		return err
 	}
 
-	if app.Port > 0 {
-		_ = createContainerProxy(app.Name, app.Port, cfg.TLD)
+	if port > 0 {
+		_ = createContainerProxy(app.Name, port, cfg.TLD)
 	}
 
+	domain := spec.Domain(cfg.TLD)
 	fmt.Println()
 	fmt.Printf("  %s %s\n", green("✅"), bold(domain))
 	fmt.Println()
@@ -346,108 +289,34 @@ func savePlanManifest(runPlan *planner.Plan) {
 	}
 }
 
-func buildAppImage(runPlan *planner.Plan, app planner.AppPlan) error {
-	buildContext := app.BuildContext
-	if buildContext == "" {
-		buildContext = runPlan.Dir
+func appSpecFromPlan(runPlan *planner.Plan, app planner.AppPlan) orchestrator.AppSpec {
+	if app.Name == "" {
+		app.Name = runPlan.ProjectName
+	}
+	if app.BuildContext == "" {
+		app.BuildContext = runPlan.Dir
+	}
+	if app.Image == "" {
+		app.Image = app.Name
 	}
 
-	dockerfile := app.Dockerfile
-	if dockerfile == "" {
-		defaultDockerfile := filepath.Join(buildContext, "Dockerfile")
-		if _, err := os.Stat(defaultDockerfile); err != nil {
-			if !os.IsNotExist(err) {
-				return fmt.Errorf("checking Dockerfile: %w", err)
-			}
-
-			fw, fwErr := detect.DetectFramework(buildContext)
-			if fwErr != nil && runPlan.Framework != nil && filepath.Clean(buildContext) == filepath.Clean(runPlan.Dir) {
-				fw = runPlan.Framework
-				fwErr = nil
-			}
-			if fwErr != nil {
-				return fmt.Errorf("no Dockerfile found and could not detect framework: %w", fwErr)
-			}
-
-			tmpl := detect.GenerateDockerfile(fw)
-			if tmpl == "" {
-				return fmt.Errorf("no Dockerfile template for framework: %s", fw.Name)
-			}
-
-			pierDir := filepath.Join(runPlan.Dir, ".pier")
-			if err := os.MkdirAll(pierDir, 0755); err != nil {
-				return fmt.Errorf("creating .pier directory: %w", err)
-			}
-
-			genName := "Dockerfile"
-			if app.ComposeName != "" {
-				genName = app.Name + ".Dockerfile"
-			}
-			dockerfile = filepath.Join(pierDir, genName)
-			if err := os.WriteFile(dockerfile, []byte(tmpl), 0644); err != nil {
-				return fmt.Errorf("writing generated Dockerfile: %w", err)
-			}
-			info(fmt.Sprintf("Generated Dockerfile for %s → %s", cyan(fw.Name), filepath.ToSlash(filepath.Join(".pier", genName))))
-		}
+	genName := ""
+	if app.ComposeName != "" {
+		genName = app.Name + ".Dockerfile"
 	}
 
-	buildArgs := []string{"build", "-t", app.Name}
-	if dockerfile != "" {
-		buildArgs = append(buildArgs, "-f", dockerfile)
+	return orchestrator.AppSpec{
+		Name:                    app.Name,
+		Dir:                     runPlan.Dir,
+		Image:                   app.Image,
+		BuildCtx:                app.BuildContext,
+		Dockerfile:              app.Dockerfile,
+		GeneratedDockerfileName: genName,
+		Framework:               runPlan.Framework,
+		Port:                    app.Port,
+		Env:                     app.Env,
+		Volumes:                 app.Volumes,
+		Entrypoint:              app.Entrypoint,
+		Command:                 app.Command,
 	}
-	buildArgs = append(buildArgs, buildContext)
-
-	buildCmd := exec.Command("docker", buildArgs...)
-	buildCmd.Dir = runPlan.Dir
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("docker build failed: %w", err)
-	}
-
-	return nil
-}
-
-func appendEntrypointOverride(args []string, entrypoint interface{}) []string {
-	if entrypoint == nil {
-		return args
-	}
-
-	switch ep := entrypoint.(type) {
-	case string:
-		return append(args, "--entrypoint", ep)
-	case []interface{}:
-		if len(ep) > 0 {
-			return append(args, "--entrypoint", fmt.Sprintf("%v", ep[0]))
-		}
-	}
-	return args
-}
-
-func appendEntrypointArgs(args []string, entrypoint interface{}) []string {
-	ep, ok := entrypoint.([]interface{})
-	if !ok || len(ep) <= 1 {
-		return args
-	}
-
-	for _, item := range ep[1:] {
-		args = append(args, fmt.Sprintf("%v", item))
-	}
-	return args
-}
-
-func appendCommandOverride(args []string, command interface{}) []string {
-	if command == nil {
-		return args
-	}
-
-	switch cmd := command.(type) {
-	case string:
-		args = append(args, cmd)
-	case []interface{}:
-		for _, item := range cmd {
-			args = append(args, fmt.Sprintf("%v", item))
-		}
-	}
-	return args
 }

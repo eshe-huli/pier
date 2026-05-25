@@ -32,11 +32,15 @@ project files. Docker is the runtime adapter, not the product surface.
   port 80 owner, while `nginx.managed=false` lets Traefik bind port 80 directly.
 - Startup now detects legacy standalone `pier-traefik` containers and replaces
   them with the compose-managed Pier stack during init/restart.
+- `pier up` and `pier run` now share the internal orchestrator for Docker image
+  builds, container runs, env injection, route labels, volumes, entrypoints, and
+  registry updates.
 
 ## Next Low-Level Closures
 
-1. Extract the duplicated Docker run/build path into the internal orchestrator
-   package so `pier run`, `pier up`, and future commands share one executor.
+1. Add command-level smoke coverage around `pier up` and `pier run` with a fake
+   Docker/infra boundary so the Valet-like flow stays verifiable without a live
+   Docker daemon in every test run.
 
 ## Verification Gates
 
