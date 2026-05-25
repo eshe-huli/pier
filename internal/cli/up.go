@@ -20,6 +20,7 @@ import (
 var upDetach bool
 var upBuild bool
 var upDryRun bool
+var upRuntime string
 
 var upCmd = &cobra.Command{
 	Use:   "up",
@@ -33,7 +34,8 @@ Examples:
   pier up
   pier up --detach
   pier up --build
-  pier up --dry-run`,
+  pier up --dry-run
+  pier up --runtime process`,
 	RunE: runUp,
 }
 
@@ -41,6 +43,7 @@ func init() {
 	upCmd.Flags().BoolVarP(&upDetach, "detach", "d", true, "Run in background (default true)")
 	upCmd.Flags().BoolVar(&upBuild, "build", false, "Force rebuild even if image exists")
 	upCmd.Flags().BoolVar(&upDryRun, "dry-run", false, "Print the Pier plan without touching Docker or project files")
+	upCmd.Flags().StringVar(&upRuntime, "runtime", "docker", "Runtime adapter: docker or process")
 	rootCmd.AddCommand(upCmd)
 }
 
@@ -62,8 +65,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("planning project: %w", err)
 	}
 
+	runtimeAdapter, err := upRuntimeAdapter()
+	if err != nil {
+		return err
+	}
+
 	if upDryRun {
-		printUpDryRun(runPlan, cfg)
+		printUpDryRun(runPlan, cfg, runtimeAdapter)
 		return nil
 	}
 
@@ -77,7 +85,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	// Check for docker-compose project
 	if runPlan.ComposeFile != nil {
-		return runUpCompose(cmd.Context(), dir, runPlan, cfg)
+		return runUpCompose(cmd.Context(), dir, runPlan, cfg, runtimeAdapter)
 	}
 
 	// Step 2: Detect services
@@ -118,11 +126,11 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return runUpBuild(cmd.Context(), runPlan, cfg, sharedServices, dbCreated)
+	return runUpBuild(cmd.Context(), runPlan, cfg, sharedServices, dbCreated, runtimeAdapter)
 }
 
 // runUpCompose handles docker-compose.yml projects
-func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *config.Config) error {
+func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *config.Config, runtimeAdapter orchestrator.RuntimeAdapter) error {
 	projectName := runPlan.ProjectName
 	infraSvcs := runPlan.InfraServices
 	apps := runPlan.Apps
@@ -169,7 +177,11 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 
 	// If no app services in compose, fall through to normal build (Dockerfile + .pier)
 	if len(runPlan.AppServices) == 0 {
-		return runUpBuild(ctx, runPlan, cfg, sharedServices, dbCreated)
+		return runUpBuild(ctx, runPlan, cfg, sharedServices, dbCreated, runtimeAdapter)
+	}
+
+	if runtimeAdapter.Name() == "process" {
+		return fmt.Errorf("process runtime does not support docker-compose app services yet; use the default docker runtime for compose projects")
 	}
 
 	// Build and run app services
@@ -234,7 +246,7 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 }
 
 // runUpBuild handles the default build+run path from a planner app plan.
-func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, sharedServices []infra.SharedService, dbCreated bool) error {
+func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, sharedServices []infra.SharedService, dbCreated bool, runtimeAdapter orchestrator.RuntimeAdapter) error {
 	if len(runPlan.Apps) == 0 {
 		return fmt.Errorf("no app plan available for %s", runPlan.ProjectName)
 	}
@@ -252,22 +264,34 @@ func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, 
 
 	projectName := runPlan.ProjectName
 	spec := appSpecFromPlan(runPlan, app)
-	step(3, "Building application...")
-	image, port, err := orchestrator.BuildImage(ctx, spec)
+	if runtimeAdapter.Name() == "docker" {
+		step(3, "Building application...")
+	} else {
+		step(3, "Resolving local process runtime...")
+	}
+	image, port, err := runtimeAdapter.BuildImage(ctx, spec)
 	if err != nil {
 		return err
 	}
-	success("Image built")
+	if runtimeAdapter.Name() == "docker" {
+		success("Image built")
+	} else {
+		success("Local process plan resolved")
+	}
 
-	step(4, fmt.Sprintf("Starting %s...", cyan(app.Name)))
+	if runtimeAdapter.Name() == "docker" {
+		step(4, fmt.Sprintf("Starting %s...", cyan(app.Name)))
+	} else {
+		step(4, fmt.Sprintf("Starting local process route for %s...", cyan(app.Name)))
+	}
 	envOverrides := planner.RuntimeEnv(projectName, runtime.BuildEnvOverrides(sharedServices))
 	spec.Route = true
-	spec.RegisterType = "docker"
-	if err := orchestrator.RunContainer(ctx, spec, image, port, cfg, envOverrides); err != nil {
+	spec.RegisterType = runtimeAdapter.Name()
+	if err := runtimeAdapter.RunApp(ctx, spec, image, port, cfg, envOverrides); err != nil {
 		return err
 	}
 
-	if port > 0 {
+	if runtimeAdapter.Name() == "docker" && port > 0 {
 		_ = createContainerProxy(app.Name, port, cfg.TLD)
 	}
 
@@ -286,8 +310,9 @@ func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, 
 		fmt.Printf("  Database: %s (auto-created)\n", projectName)
 		fmt.Println()
 	}
-	// Register in project registry
-	_ = registry.Register(registry.Project{Name: projectName, Dir: runPlan.Dir, Type: "docker"})
+	if runtimeAdapter.Name() == "docker" {
+		_ = registry.Register(registry.Project{Name: projectName, Dir: runPlan.Dir, Type: "docker"})
+	}
 
 	return nil
 }
@@ -298,10 +323,11 @@ func savePlanManifest(runPlan *planner.Plan) {
 	}
 }
 
-func printUpDryRun(runPlan *planner.Plan, cfg *config.Config) {
+func printUpDryRun(runPlan *planner.Plan, cfg *config.Config, runtimeAdapter orchestrator.RuntimeAdapter) {
 	fmt.Println("  Dry run: pier up would execute this plan")
 	fmt.Printf("  Project: %s\n", cyan(runPlan.ProjectName))
 	fmt.Printf("  Source:  %s\n", cyan(string(runPlan.Source)))
+	fmt.Printf("  Runtime: %s\n", cyan(runtimeAdapter.Name()))
 
 	if len(runPlan.ServiceSpecs) > 0 {
 		fmt.Println()
@@ -329,6 +355,15 @@ func printUpDryRun(runPlan *planner.Plan, cfg *config.Config) {
 			if app.Dockerfile != "" {
 				fmt.Printf(" dockerfile=%s", app.Dockerfile)
 			}
+			if runtimeAdapter.Name() == "process" {
+				port := app.Port
+				if port == 0 && runPlan.Framework != nil {
+					port = runPlan.Framework.Port
+				}
+				if command := orchestrator.LocalProcessCommand(appSpecFromPlan(runPlan, app), port); command != "" {
+					fmt.Printf(" command=%s", command)
+				}
+			}
 			fmt.Println()
 		}
 	}
@@ -340,6 +375,17 @@ func printUpDryRun(runPlan *planner.Plan, cfg *config.Config) {
 
 	fmt.Println()
 	fmt.Println("  No Docker, proxy, registry, manifest, or gitignore changes were made.")
+}
+
+func upRuntimeAdapter() (orchestrator.RuntimeAdapter, error) {
+	switch strings.ToLower(strings.TrimSpace(upRuntime)) {
+	case "", "docker":
+		return orchestrator.DockerAdapter{}, nil
+	case "process":
+		return orchestrator.LocalProcessAdapter{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported runtime %q (expected docker or process)", upRuntime)
+	}
 }
 
 func appSpecFromPlan(runPlan *planner.Plan, app planner.AppPlan) orchestrator.AppSpec {

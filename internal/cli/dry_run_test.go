@@ -41,6 +41,36 @@ func TestPierUpDryRunPlansWithoutSideEffects(t *testing.T) {
 	}
 }
 
+func TestPierUpDryRunShowsProcessRuntime(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestFile(t, dir, "package.json", `{"dependencies":{"next":"15.0.0"}}`)
+	chdir(t, dir)
+
+	restore := setUpGlobalsForTest()
+	defer restore()
+	upDryRun = true
+	upRuntime = "process"
+
+	output := captureStdout(t, func() {
+		if err := runUp(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("runUp returned error: %v", err)
+		}
+	})
+
+	assertOutputContains(t, output, "Runtime:")
+	assertOutputContains(t, output, "process")
+	assertOutputContains(t, output, "command=npx next dev -p 3000")
+
+	if _, err := os.Stat(filepath.Join(dir, ".pier", "manifest.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote manifest: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".pier", "registry.json")); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote registry: %v", err)
+	}
+}
+
 func TestPierRunDryRunPlansImageServicesAndRoute(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
@@ -78,13 +108,16 @@ func setUpGlobalsForTest() func() {
 	oldDetach := upDetach
 	oldBuild := upBuild
 	oldDryRun := upDryRun
+	oldRuntime := upRuntime
 	upDetach = true
 	upBuild = false
 	upDryRun = false
+	upRuntime = "docker"
 	return func() {
 		upDetach = oldDetach
 		upBuild = oldBuild
 		upDryRun = oldDryRun
+		upRuntime = oldRuntime
 	}
 }
 

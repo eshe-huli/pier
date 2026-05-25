@@ -2,10 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/eshe-huli/pier/internal/config"
+	"github.com/eshe-huli/pier/internal/detect"
+	"github.com/eshe-huli/pier/internal/registry"
 )
 
 type fakeRuntimeAdapter struct {
@@ -154,6 +159,149 @@ func TestDockerRunArgsEntrypointCommandAndRelativeVolume(t *testing.T) {
 	}
 }
 
+func TestLocalProcessAdapterBuildImageResolvesFrameworkPort(t *testing.T) {
+	adapter := LocalProcessAdapter{}
+
+	image, port, err := adapter.BuildImage(context.Background(), AppSpec{
+		Name: "web",
+		Dir:  t.TempDir(),
+		Framework: &detect.Framework{
+			Name:     "nextjs",
+			Language: "node",
+			Port:     3000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildImage returned error: %v", err)
+	}
+	if image != "web" {
+		t.Fatalf("image = %q, want web", image)
+	}
+	if port != 3000 {
+		t.Fatalf("port = %d, want 3000", port)
+	}
+}
+
+func TestDevCommandForFramework(t *testing.T) {
+	tests := []struct {
+		name string
+		fw   *detect.Framework
+		port int
+		want string
+	}{
+		{
+			name: "nextjs",
+			fw:   &detect.Framework{Name: "nextjs"},
+			port: 3001,
+			want: "npx next dev -p 3001",
+		},
+		{
+			name: "laravel",
+			fw:   &detect.Framework{Name: "laravel"},
+			port: 8000,
+			want: "php artisan serve --port=8000",
+		},
+		{
+			name: "unknown",
+			fw:   &detect.Framework{Name: "unknown"},
+			port: 9000,
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DevCommandForFramework(tt.fw, tt.port); got != tt.want {
+				t.Fatalf("DevCommandForFramework() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLocalProcessCommandPrefersPierfileCommand(t *testing.T) {
+	dir := t.TempDir()
+	writeOrchestratorTestFile(t, dir, "Pierfile", "name: api\nport: 4173\nservices:\n  - name: app\n    command: npm run dev -- --host 0.0.0.0\n")
+
+	got := LocalProcessCommand(AppSpec{
+		Name: "api",
+		Dir:  dir,
+		Framework: &detect.Framework{
+			Name: "nextjs",
+			Port: 3000,
+		},
+	}, 3000)
+
+	if got != "npm run dev -- --host 0.0.0.0" {
+		t.Fatalf("LocalProcessCommand() = %q", got)
+	}
+}
+
+func TestLocalProcessRunAppCreatesProxyAndRegistryWithoutCommand(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	t.Setenv("HOME", home)
+
+	adapter := LocalProcessAdapter{}
+	err := adapter.RunApp(
+		context.Background(),
+		AppSpec{Name: "api", Dir: dir},
+		"",
+		4242,
+		&config.Config{TLD: "dock"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("RunApp returned error: %v", err)
+	}
+
+	proxyFile := filepath.Join(home, ".pier", "traefik", "dynamic", "api.yaml")
+	data, err := os.ReadFile(proxyFile)
+	if err != nil {
+		t.Fatalf("reading proxy file: %v", err)
+	}
+	if !strings.Contains(string(data), "host.docker.internal:4242") {
+		t.Fatalf("proxy file missing host process target:\n%s", string(data))
+	}
+
+	projects, err := registry.Load()
+	if err != nil {
+		t.Fatalf("loading registry: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("registry length = %d, want 1", len(projects))
+	}
+	if projects[0].Name != "api" || projects[0].Port != 4242 || projects[0].Type != "proxy" {
+		t.Fatalf("registry project = %#v", projects[0])
+	}
+}
+
+func TestLocalProcessEnvMergesRuntimeAndAppEnv(t *testing.T) {
+	got := localProcessEnv(
+		[]string{"PATH=/bin", "PORT=1000", "DATABASE_URL=old"},
+		AppSpec{
+			Env: map[string]string{
+				"APP_ENV":      "local",
+				"DATABASE_URL": "app",
+			},
+			ExtraEnv: []string{"FEATURE=true"},
+		},
+		[]string{"DATABASE_URL=runtime", "REDIS_URL=redis://pier"},
+		5000,
+	)
+
+	want := []string{
+		"PATH=/bin",
+		"PORT=5000",
+		"DATABASE_URL=app",
+		"REDIS_URL=redis://pier",
+		"APP_ENV=local",
+		"FEATURE=true",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("localProcessEnv() = %#v, want %#v", got, want)
+	}
+}
+
 func flagValues(args []string, flag string) []string {
 	var values []string
 	for i := 0; i < len(args)-1; i++ {
@@ -173,4 +321,15 @@ func assertContains(t *testing.T, args []string, want string) {
 		}
 	}
 	t.Fatalf("args missing %q: %#v", want, args)
+}
+
+func writeOrchestratorTestFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("creating test directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("writing test file: %v", err)
+	}
 }

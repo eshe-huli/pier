@@ -42,12 +42,19 @@ project files. Docker is the runtime adapter, not the product surface.
 - `pier up` and `pier run` now execute through an explicit `RuntimeAdapter`
   boundary, with Docker registered as the default adapter and tests proving the
   CLI-facing orchestrator can swap adapters without changing the plan shape.
+- `pier up --runtime process` now runs the first host-process runtime adapter:
+  it resolves the same planner app shape, starts a framework/Pierfile command
+  when known, creates a file-provider `.dock` route, writes link metadata, and
+  registers the project without app Docker.
 
 ## Next Low-Level Closures
 
-1. Implement the local-process runtime adapter against the same `RuntimeAdapter`
-   contract so `pier up` can choose process mode without Docker while preserving
-   the same domain, proxy, registry, and dry-run behavior.
+1. Extend process runtime lifecycle coverage into `pier down`, `pier logs`, and
+   dashboard restart flows so process-mode projects are as operable as Docker
+   projects after launch.
+2. Decide how far process mode should go for docker-compose projects: keep app
+   services on Docker by default, or map explicitly declared commands to host
+   processes while reusing compose infra.
 
 ## Verification Gates
 

@@ -16,7 +16,7 @@ type Project struct {
 	Dir       string `json:"dir"`
 	Port      int    `json:"port"`
 	Command   string `json:"command,omitempty"`
-	Type      string `json:"type"` // "link", "docker", "run"
+	Type      string `json:"type"` // "linked", "proxy", "docker", "run"
 	Framework string `json:"framework,omitempty"`
 	LastUsed  string `json:"lastUsed"`
 }

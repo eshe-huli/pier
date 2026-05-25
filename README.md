@@ -30,6 +30,7 @@ What [Laravel Valet](https://laravel.com/docs/valet) did for PHP, Pier does for 
 ```bash
 pier init                    # one-time setup
 pier proxy myapp 3000        # http://myapp.dock → localhost:3000
+pier up --runtime process    # http://myapp.dock → detected local dev server
 docker compose up            # http://app.dock → container (automatic)
 ```
 
@@ -67,6 +68,7 @@ pier status                  # System health check
 pier doctor                  # Diagnose issues with fix suggestions
 pier dashboard               # Open Traefik dashboard in browser
 pier up --dry-run            # Preview what Pier would run without side effects
+pier up --runtime process    # Run/link the project as a local process
 pier run api --image node:20 --dry-run
 pier down                    # Stop Pier infrastructure
 pier restart                 # Restart everything
@@ -110,6 +112,9 @@ pier proxy myapp 3000         # → http://myapp.dock
 
 go run main.go                # Running on port 8080
 pier proxy api 8080           # → http://api.dock
+
+pier up --runtime process     # Detects the framework/Pierfile command,
+                               # starts it when known, and routes the domain
 ```
 
 ## How It Works
@@ -144,7 +149,7 @@ pier proxy api 8080           # → http://api.dock
 | | **Pier** | **Laravel Valet** | **Docker Compose ports** | **/etc/hosts** |
 |---|---|---|---|---|
 | Docker containers | ✅ Automatic | ❌ PHP only | ⚠️ Manual port mapping | ⚠️ Manual per-host |
-| Local processes | ✅ `pier proxy` | ✅ `valet proxy` | ❌ | ⚠️ Manual |
+| Local processes | ✅ `pier up --runtime process` / `pier proxy` | ✅ `valet proxy` | ❌ | ⚠️ Manual |
 | Setup | One command | One command | Per-project YAML | Manual editing |
 | Conflicts | None (unique names) | None (.test TLD) | Port collisions | Stale entries |
 | Multiple services | All get domains | PHP apps only | Port juggling | Works but painful |
@@ -192,6 +197,7 @@ Different TLDs, different nginx server blocks. No conflicts.
 | `pier init` | One-time setup (Docker network, Traefik, dnsmasq, nginx) |
 | `pier ls` | List all active services with their domains |
 | `pier up --dry-run` | Preview the detected app/services/domains without touching Docker or project files |
+| `pier up --runtime process` | Start or link the detected app as a host process behind a `.dock` route |
 | `pier run <name> --image <image> --dry-run` | Preview an ad hoc Docker run plan without starting infra |
 | `pier proxy <name> <port>` | Route `<name>.dock` → `localhost:<port>` |
 | `pier unproxy <name>` | Remove a bare-metal proxy route |

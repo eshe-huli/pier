@@ -14,6 +14,7 @@ import (
 
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/detect"
+	"github.com/eshe-huli/pier/internal/orchestrator"
 	"github.com/eshe-huli/pier/internal/pierfile"
 	"github.com/eshe-huli/pier/internal/proxy"
 	"github.com/eshe-huli/pier/internal/registry"
@@ -97,7 +98,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 			if port == 0 {
 				port = fw.Port
 			}
-			devCmd = detectDevCommand(fw, port)
+			devCmd = orchestrator.DevCommandForFramework(fw, port)
 		}
 	}
 
@@ -181,37 +182,6 @@ func runLink(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func detectDevCommand(fw *detect.Framework, port int) string {
-	switch fw.Name {
-	case "nextjs":
-		return fmt.Sprintf("npx next dev -p %d", port)
-	case "nuxt":
-		return fmt.Sprintf("npx nuxi dev --port %d", port)
-	case "nestjs":
-		return "npm run start:dev"
-	case "express", "fastify":
-		return "npm run dev"
-	case "django":
-		return fmt.Sprintf("python manage.py runserver 0.0.0.0:%d", port)
-	case "fastapi":
-		return fmt.Sprintf("uvicorn main:app --reload --port %d", port)
-	case "flask":
-		return fmt.Sprintf("flask run --port %d", port)
-	case "go":
-		return "go run ."
-	case "rails":
-		return fmt.Sprintf("rails server -p %d", port)
-	case "phoenix":
-		return "mix phx.server"
-	case "laravel":
-		return fmt.Sprintf("php artisan serve --port=%d", port)
-	case "spring-boot":
-		return "./mvnw spring-boot:run"
-	default:
-		return ""
-	}
-}
-
 func saveLinkMeta(name, dir string, port int, command string, framework string) {
 	// Save to legacy links dir
 	linksDir := config.LinksDir()
@@ -226,7 +196,7 @@ func saveLinkMeta(name, dir string, port int, command string, framework string) 
 		Dir:       dir,
 		Port:      port,
 		Command:   command,
-		Type:      "link",
+		Type:      "linked",
 		Framework: framework,
 	})
 }
