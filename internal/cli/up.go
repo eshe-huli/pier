@@ -15,7 +15,6 @@ import (
 	"github.com/eshe-huli/pier/internal/docker"
 	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/infra"
-	"github.com/eshe-huli/pier/internal/pierfile"
 	"github.com/eshe-huli/pier/internal/planner"
 	"github.com/eshe-huli/pier/internal/registry"
 	"github.com/eshe-huli/pier/internal/runtime"
@@ -66,7 +65,6 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("planning project: %w", err)
 	}
 	projectName := runPlan.ProjectName
-	pf := runPlan.Pierfile
 
 	step(1, fmt.Sprintf("Project: %s", cyan(projectName)))
 
@@ -113,143 +111,14 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 4: Build the app
-	port := 0
-	if pf != nil && pf.Port > 0 {
-		port = pf.Port
-	}
-
-	step(3, "Building application...")
-	dockerfile := filepath.Join(dir, "Dockerfile")
-	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
-		// No Dockerfile — detect framework and generate one
-		fw, fwErr := detect.DetectFramework(dir)
-		if fwErr != nil {
-			return fmt.Errorf("no Dockerfile found and could not detect framework: %w", fwErr)
-		}
-		if port == 0 {
-			port = fw.Port
-		}
-
-		tmpl := detect.GenerateDockerfile(fw)
-		if tmpl == "" {
-			return fmt.Errorf("no Dockerfile template for framework: %s", fw.Name)
-		}
-
-		// Write to .pier/Dockerfile (don't touch project root)
-		pierDir := filepath.Join(dir, ".pier")
-		if err := os.MkdirAll(pierDir, 0755); err != nil {
-			return fmt.Errorf("creating .pier directory: %w", err)
-		}
-		genDockerfile := filepath.Join(pierDir, "Dockerfile")
-		if err := os.WriteFile(genDockerfile, []byte(tmpl), 0644); err != nil {
-			return fmt.Errorf("writing generated Dockerfile: %w", err)
-		}
-		info(fmt.Sprintf("Generated Dockerfile for %s → .pier/Dockerfile", cyan(fw.Name)))
-
-		// Build from generated Dockerfile with project dir as context
-		buildCmd := exec.Command("docker", "build", "-t", projectName, "-f", genDockerfile, ".")
-		buildCmd.Dir = dir
-		buildCmd.Stdout = os.Stdout
-		buildCmd.Stderr = os.Stderr
-		if err := buildCmd.Run(); err != nil {
-			return fmt.Errorf("docker build failed: %w", err)
-		}
-	} else {
-		// Dockerfile exists — detect port from framework if not set
-		if port == 0 {
-			if fw, fwErr := detect.DetectFramework(dir); fwErr == nil {
-				port = fw.Port
-			}
-		}
-
-		buildCmd := exec.Command("docker", "build", "-t", projectName, ".")
-		buildCmd.Dir = dir
-		buildCmd.Stdout = os.Stdout
-		buildCmd.Stderr = os.Stderr
-		if err := buildCmd.Run(); err != nil {
-			return fmt.Errorf("docker build failed: %w", err)
-		}
-	}
-	success("Image built")
-
-	// Step 5: Stop old container if running
-	_ = docker.StopAndRemoveContainer(cmd.Context(), projectName)
-
-	// Step 6: Run the app container
-	step(4, fmt.Sprintf("Starting %s...", cyan(projectName)))
-
-	envOverrides := runtime.BuildEnvOverrides(sharedServices)
-
-	dockerArgs := []string{"run", "-d", "--name", projectName, "--network", cfg.Network, "--restart", "unless-stopped"}
-
-	// Env overrides from shared services
-	for _, e := range envOverrides {
-		dockerArgs = append(dockerArgs, "-e", e)
-	}
-
-	// Inject DATABASE_NAME
-	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", strings.ReplaceAll(projectName, "-", "_")))
-	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DB_DATABASE=%s", strings.ReplaceAll(projectName, "-", "_")))
-
-	// Pierfile extra env
-	if pf != nil {
-		for k, v := range pf.Env {
-			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
-		}
-	}
-
-	// Traefik labels
-	dockerArgs = append(dockerArgs,
-		"-l", "traefik.enable=true",
-		"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", projectName, projectName, cfg.TLD),
-	)
-	if port > 0 {
-		dockerArgs = append(dockerArgs,
-			"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", projectName, port),
-		)
-	}
-
-	dockerArgs = append(dockerArgs, projectName)
-
-	dockerCmd := exec.Command("docker", dockerArgs...)
-	out, err := dockerCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker run failed: %s\n%s", err, string(out))
-	}
-
-	// Step 7: Create Traefik route (file proxy as backup)
-	if port > 0 {
-		_ = createContainerProxy(projectName, port, cfg.TLD)
-	}
-
-	// Step 8: Print result
-	fmt.Println()
-	domain := fmt.Sprintf("%s.%s", projectName, cfg.TLD)
-	fmt.Printf("  %s %s\n", green("✅"), bold(domain))
-	fmt.Println()
-
-	if len(sharedServices) > 0 {
-		fmt.Println("  Services:")
-		for _, svc := range sharedServices {
-			fmt.Printf("    📦 %s (shared)\n", svc.Container)
-		}
-		fmt.Println()
-	}
-
-	if dbCreated {
-		fmt.Printf("  Database: %s (auto-created)\n", projectName)
-		fmt.Println()
-	}
-
-	return nil
+	return runUpBuild(cmd.Context(), runPlan, cfg, sharedServices, dbCreated)
 }
 
 // runUpCompose handles docker-compose.yml projects
 func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *config.Config) error {
 	projectName := runPlan.ProjectName
 	infraSvcs := runPlan.InfraServices
-	appSvcs := runPlan.AppServices
+	apps := runPlan.Apps
 
 	// Ensure shared infra
 	var sharedServices []infra.SharedService
@@ -259,7 +128,7 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 		for _, is := range infraSvcs {
 			version := is.Version
 			if version == "" {
-				version = defaultVersion(is.Name)
+				version = planner.DefaultVersion(is.Name)
 			}
 
 			fmt.Printf("    → %s:%s (replaces compose '%s') ", cyan(is.Name), version, is.ComposeName)
@@ -284,69 +153,47 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 		}
 	}
 
-	envOverrides := runtime.BuildEnvOverrides(sharedServices)
-
 	// Generate .pier/env from project .env + pier overrides
-	dbName := strings.ReplaceAll(projectName, "-", "_")
-	allOverrides := append(envOverrides,
-		fmt.Sprintf("DATABASE_NAME=%s", dbName),
-		fmt.Sprintf("DB_DATABASE=%s", dbName),
-	)
-	pierEnvFile, envErr := runtime.GenerateEnvFile(dir, allOverrides)
+	envOverrides := planner.RuntimeEnv(projectName, runtime.BuildEnvOverrides(sharedServices))
+	pierEnvFile, envErr := runtime.GenerateEnvFile(dir, envOverrides)
 	if envErr != nil {
 		warn(fmt.Sprintf("Could not generate .pier/env: %s", envErr))
 	}
 
 	// If no app services in compose, fall through to normal build (Dockerfile + .pier)
-	if len(appSvcs) == 0 {
-		return runUpBuild(ctx, dir, projectName, cfg, sharedServices, dbCreated)
+	if len(runPlan.AppServices) == 0 {
+		return runUpBuild(ctx, runPlan, cfg, sharedServices, dbCreated)
 	}
 
 	// Build and run app services
-	for i, app := range appSvcs {
-		appName := projectName
-		if len(appSvcs) > 1 {
-			appName = app.ComposeName
+	for i, app := range apps {
+		if app.BuildContext != "" {
+			step(3+i, fmt.Sprintf("Building %s...", cyan(app.Name)))
+			if err := buildAppImage(runPlan, app); err != nil {
+				return fmt.Errorf("building %s: %w", app.Name, err)
+			}
+			success("Image built")
 		}
 
-		step(3+i, fmt.Sprintf("Building %s...", cyan(appName)))
-
-		// Build
-		if app.Build != "" {
-			buildCtx := app.Build
-			if !filepath.IsAbs(buildCtx) {
-				buildCtx = filepath.Join(dir, buildCtx)
-			}
-			buildCmd := exec.Command("docker", "build", "-t", appName, buildCtx)
-			buildCmd.Stdout = os.Stdout
-			buildCmd.Stderr = os.Stderr
-			if err := buildCmd.Run(); err != nil {
-				return fmt.Errorf("building %s: %w", appName, err)
-			}
-		}
-
-		image := appName
-		if app.Build == "" && app.Image != "" {
-			image = app.Image
+		image := app.Image
+		if image == "" {
+			image = app.Name
 		}
 
 		// Stop old
-		_ = docker.StopAndRemoveContainer(ctx, appName)
-
-		// Determine port
-		port := parseFirstPort(app.Ports)
+		_ = docker.StopAndRemoveContainer(ctx, app.Name)
 
 		// Run
-		dockerArgs := []string{"run", "-d", "--name", appName, "--network", cfg.Network, "--restart", "unless-stopped"}
+		dockerArgs := []string{"run", "-d", "--name", app.Name, "--network", cfg.Network, "--restart", "unless-stopped"}
 
 		// For built apps: use .pier/env file (clean, no baked-in env)
 		// For sidecars (image-only): pass env vars individually
-		if app.Build != "" && pierEnvFile != "" {
+		if app.UseEnvFile && pierEnvFile != "" {
 			dockerArgs = append(dockerArgs, "--env-file", pierEnvFile)
 		}
 
 		// Compose environment vars (lower priority)
-		for k, v := range app.Environment {
+		for k, v := range app.Env {
 			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
 		}
 
@@ -354,89 +201,45 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 		for _, e := range envOverrides {
 			dockerArgs = append(dockerArgs, "-e", e)
 		}
-		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", strings.ReplaceAll(projectName, "-", "_")))
-		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DB_DATABASE=%s", strings.ReplaceAll(projectName, "-", "_")))
 
 		// Traefik labels
 		dockerArgs = append(dockerArgs,
 			"-l", "traefik.enable=true",
-			"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", appName, appName, cfg.TLD),
+			"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", app.Name, app.Name, cfg.TLD),
 		)
-		if port > 0 {
+		if app.Port > 0 {
 			dockerArgs = append(dockerArgs,
-				"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", appName, port),
+				"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", app.Name, app.Port),
 			)
 		}
 
-		// Volumes (resolve relative paths against project dir)
+		// Volumes are resolved by the planner.
 		for _, v := range app.Volumes {
-			// Only pass bind mounts (contain :), skip named volumes
-			if strings.Contains(v, ":") {
-				parts := strings.SplitN(v, ":", 3)
-				hostPath := parts[0]
-				if !filepath.IsAbs(hostPath) {
-					hostPath = filepath.Join(dir, hostPath)
-				}
-				mount := hostPath + ":" + strings.Join(parts[1:], ":")
-				dockerArgs = append(dockerArgs, "-v", mount)
-			}
+			dockerArgs = append(dockerArgs, "-v", v)
 		}
 
-		// Entrypoint override (must be before IMAGE in docker run)
-		if app.Entrypoint != nil {
-			switch ep := app.Entrypoint.(type) {
-			case string:
-				dockerArgs = append(dockerArgs, "--entrypoint", ep)
-			case []interface{}:
-				if len(ep) > 0 {
-					dockerArgs = append(dockerArgs, "--entrypoint", fmt.Sprintf("%v", ep[0]))
-				}
-			}
-		}
+		dockerArgs = appendEntrypointOverride(dockerArgs, app.Entrypoint)
 
 		dockerArgs = append(dockerArgs, image)
-
-		// Entrypoint args (remaining elements after first)
-		if app.Entrypoint != nil {
-			if ep, ok := app.Entrypoint.([]interface{}); ok && len(ep) > 1 {
-				for _, e := range ep[1:] {
-					dockerArgs = append(dockerArgs, fmt.Sprintf("%v", e))
-				}
-			}
-		}
-
-		// Command override (goes after IMAGE)
-		if app.Command != nil {
-			switch cmd := app.Command.(type) {
-			case string:
-				dockerArgs = append(dockerArgs, cmd)
-			case []interface{}:
-				for _, c := range cmd {
-					dockerArgs = append(dockerArgs, fmt.Sprintf("%v", c))
-				}
-			}
-		}
+		dockerArgs = appendEntrypointArgs(dockerArgs, app.Entrypoint)
+		dockerArgs = appendCommandOverride(dockerArgs, app.Command)
 
 		dockerCmd := exec.Command("docker", dockerArgs...)
 		out, err := dockerCmd.CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("running %s: %s\n%s", appName, err, string(out))
+			return fmt.Errorf("running %s: %s\n%s", app.Name, err, string(out))
 		}
 
 		// File proxy backup
-		if port > 0 {
-			_ = createContainerProxy(appName, port, cfg.TLD)
+		if app.Port > 0 {
+			_ = createContainerProxy(app.Name, app.Port, cfg.TLD)
 		}
 	}
 
 	// Print result
 	fmt.Println()
-	for _, app := range appSvcs {
-		appName := projectName
-		if len(appSvcs) > 1 {
-			appName = app.ComposeName
-		}
-		domain := fmt.Sprintf("%s.%s", appName, cfg.TLD)
+	for _, app := range apps {
+		domain := fmt.Sprintf("%s.%s", app.Name, cfg.TLD)
 		fmt.Printf("  %s %s\n", green("✅"), bold(domain))
 	}
 	fmt.Println()
@@ -459,86 +262,51 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 	return nil
 }
 
-// runUpBuild handles the build+run path when compose has no app services
-func runUpBuild(ctx context.Context, dir, projectName string, cfg *config.Config, sharedServices []infra.SharedService, dbCreated bool) error {
-	var pf *pierfile.Pierfile
-	if pierfile.Exists(dir) {
-		pf, _ = pierfile.Load(dir)
+// runUpBuild handles the default build+run path from a planner app plan.
+func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, sharedServices []infra.SharedService, dbCreated bool) error {
+	if len(runPlan.Apps) == 0 {
+		return fmt.Errorf("no app plan available for %s", runPlan.ProjectName)
 	}
 
-	port := 0
-	if pf != nil && pf.Port > 0 {
-		port = pf.Port
+	app := runPlan.Apps[0]
+	if app.Name == "" {
+		app.Name = runPlan.ProjectName
+	}
+	if app.BuildContext == "" {
+		app.BuildContext = runPlan.Dir
+	}
+	if app.Image == "" {
+		app.Image = app.Name
 	}
 
+	projectName := runPlan.ProjectName
 	step(3, "Building application...")
-	dockerfile := filepath.Join(dir, "Dockerfile")
-	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
-		fw, fwErr := detect.DetectFramework(dir)
-		if fwErr != nil {
-			return fmt.Errorf("no Dockerfile found and could not detect framework: %w", fwErr)
-		}
-		if port == 0 {
-			port = fw.Port
-		}
-		tmpl := detect.GenerateDockerfile(fw)
-		if tmpl == "" {
-			return fmt.Errorf("no Dockerfile template for framework: %s", fw.Name)
-		}
-		pierDir := filepath.Join(dir, ".pier")
-		_ = os.MkdirAll(pierDir, 0755)
-		genDockerfile := filepath.Join(pierDir, "Dockerfile")
-		_ = os.WriteFile(genDockerfile, []byte(tmpl), 0644)
-		info(fmt.Sprintf("Generated Dockerfile for %s → .pier/Dockerfile", cyan(fw.Name)))
-
-		buildCmd := exec.Command("docker", "build", "-t", projectName, "-f", genDockerfile, ".")
-		buildCmd.Dir = dir
-		buildCmd.Stdout = os.Stdout
-		buildCmd.Stderr = os.Stderr
-		if err := buildCmd.Run(); err != nil {
-			return fmt.Errorf("docker build failed: %w", err)
-		}
-	} else {
-		if port == 0 {
-			if fw, fwErr := detect.DetectFramework(dir); fwErr == nil {
-				port = fw.Port
-			}
-		}
-		buildCmd := exec.Command("docker", "build", "-t", projectName, ".")
-		buildCmd.Dir = dir
-		buildCmd.Stdout = os.Stdout
-		buildCmd.Stderr = os.Stderr
-		if err := buildCmd.Run(); err != nil {
-			return fmt.Errorf("docker build failed: %w", err)
-		}
+	if err := buildAppImage(runPlan, app); err != nil {
+		return err
 	}
 	success("Image built")
 
-	_ = docker.StopAndRemoveContainer(ctx, projectName)
+	_ = docker.StopAndRemoveContainer(ctx, app.Name)
 
-	step(4, fmt.Sprintf("Starting %s...", cyan(projectName)))
-	envOverrides := runtime.BuildEnvOverrides(sharedServices)
-	dockerArgs := []string{"run", "-d", "--name", projectName, "--network", cfg.Network, "--restart", "unless-stopped"}
+	step(4, fmt.Sprintf("Starting %s...", cyan(app.Name)))
+	envOverrides := planner.RuntimeEnv(projectName, runtime.BuildEnvOverrides(sharedServices))
+	dockerArgs := []string{"run", "-d", "--name", app.Name, "--network", cfg.Network, "--restart", "unless-stopped"}
 	for _, e := range envOverrides {
 		dockerArgs = append(dockerArgs, "-e", e)
 	}
-	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DATABASE_NAME=%s", strings.ReplaceAll(projectName, "-", "_")))
-	dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("DB_DATABASE=%s", strings.ReplaceAll(projectName, "-", "_")))
-	if pf != nil {
-		for k, v := range pf.Env {
-			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
-		}
+	for k, v := range app.Env {
+		dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 	dockerArgs = append(dockerArgs,
 		"-l", "traefik.enable=true",
-		"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", projectName, projectName, cfg.TLD),
+		"-l", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.%s`)", app.Name, app.Name, cfg.TLD),
 	)
-	if port > 0 {
+	if app.Port > 0 {
 		dockerArgs = append(dockerArgs,
-			"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", projectName, port),
+			"-l", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", app.Name, app.Port),
 		)
 	}
-	dockerArgs = append(dockerArgs, projectName)
+	dockerArgs = append(dockerArgs, app.Image)
 
 	dockerCmd := exec.Command("docker", dockerArgs...)
 	out, err := dockerCmd.CombinedOutput()
@@ -546,12 +314,12 @@ func runUpBuild(ctx context.Context, dir, projectName string, cfg *config.Config
 		return fmt.Errorf("docker run failed: %s\n%s", err, string(out))
 	}
 
-	if port > 0 {
-		_ = createContainerProxy(projectName, port, cfg.TLD)
+	if app.Port > 0 {
+		_ = createContainerProxy(app.Name, app.Port, cfg.TLD)
 	}
 
 	fmt.Println()
-	domain := fmt.Sprintf("%s.%s", projectName, cfg.TLD)
+	domain := fmt.Sprintf("%s.%s", app.Name, cfg.TLD)
 	fmt.Printf("  %s %s\n", green("✅"), bold(domain))
 	fmt.Println()
 	if len(sharedServices) > 0 {
@@ -566,23 +334,113 @@ func runUpBuild(ctx context.Context, dir, projectName string, cfg *config.Config
 		fmt.Println()
 	}
 	// Register in project registry
-	_ = registry.Register(registry.Project{Name: projectName, Dir: dir, Type: "docker"})
+	_ = registry.Register(registry.Project{Name: projectName, Dir: runPlan.Dir, Type: "docker"})
 
 	return nil
 }
 
-func defaultVersion(name string) string {
-	return planner.DefaultVersion(name)
+func buildAppImage(runPlan *planner.Plan, app planner.AppPlan) error {
+	buildContext := app.BuildContext
+	if buildContext == "" {
+		buildContext = runPlan.Dir
+	}
+
+	dockerfile := app.Dockerfile
+	if dockerfile == "" {
+		defaultDockerfile := filepath.Join(buildContext, "Dockerfile")
+		if _, err := os.Stat(defaultDockerfile); err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("checking Dockerfile: %w", err)
+			}
+
+			fw, fwErr := detect.DetectFramework(buildContext)
+			if fwErr != nil && runPlan.Framework != nil && filepath.Clean(buildContext) == filepath.Clean(runPlan.Dir) {
+				fw = runPlan.Framework
+				fwErr = nil
+			}
+			if fwErr != nil {
+				return fmt.Errorf("no Dockerfile found and could not detect framework: %w", fwErr)
+			}
+
+			tmpl := detect.GenerateDockerfile(fw)
+			if tmpl == "" {
+				return fmt.Errorf("no Dockerfile template for framework: %s", fw.Name)
+			}
+
+			pierDir := filepath.Join(runPlan.Dir, ".pier")
+			if err := os.MkdirAll(pierDir, 0755); err != nil {
+				return fmt.Errorf("creating .pier directory: %w", err)
+			}
+
+			genName := "Dockerfile"
+			if app.ComposeName != "" {
+				genName = app.Name + ".Dockerfile"
+			}
+			dockerfile = filepath.Join(pierDir, genName)
+			if err := os.WriteFile(dockerfile, []byte(tmpl), 0644); err != nil {
+				return fmt.Errorf("writing generated Dockerfile: %w", err)
+			}
+			info(fmt.Sprintf("Generated Dockerfile for %s → %s", cyan(fw.Name), filepath.ToSlash(filepath.Join(".pier", genName))))
+		}
+	}
+
+	buildArgs := []string{"build", "-t", app.Name}
+	if dockerfile != "" {
+		buildArgs = append(buildArgs, "-f", dockerfile)
+	}
+	buildArgs = append(buildArgs, buildContext)
+
+	buildCmd := exec.Command("docker", buildArgs...)
+	buildCmd.Dir = runPlan.Dir
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("docker build failed: %w", err)
+	}
+
+	return nil
 }
 
-func parseFirstPort(ports []string) int {
-	if len(ports) == 0 {
-		return 0
+func appendEntrypointOverride(args []string, entrypoint interface{}) []string {
+	if entrypoint == nil {
+		return args
 	}
-	p := ports[0]
-	p = strings.Split(p, "/")[0]
-	parts := strings.Split(p, ":")
-	var port int
-	fmt.Sscanf(parts[len(parts)-1], "%d", &port)
-	return port
+
+	switch ep := entrypoint.(type) {
+	case string:
+		return append(args, "--entrypoint", ep)
+	case []interface{}:
+		if len(ep) > 0 {
+			return append(args, "--entrypoint", fmt.Sprintf("%v", ep[0]))
+		}
+	}
+	return args
+}
+
+func appendEntrypointArgs(args []string, entrypoint interface{}) []string {
+	ep, ok := entrypoint.([]interface{})
+	if !ok || len(ep) <= 1 {
+		return args
+	}
+
+	for _, item := range ep[1:] {
+		args = append(args, fmt.Sprintf("%v", item))
+	}
+	return args
+}
+
+func appendCommandOverride(args []string, command interface{}) []string {
+	if command == nil {
+		return args
+	}
+
+	switch cmd := command.(type) {
+	case string:
+		args = append(args, cmd)
+	case []interface{}:
+		for _, item := range cmd {
+			args = append(args, fmt.Sprintf("%v", item))
+		}
+	}
+	return args
 }

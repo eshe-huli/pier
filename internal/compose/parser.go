@@ -38,6 +38,7 @@ type InfraService struct {
 type AppService struct {
 	ComposeName string
 	Build       string // build context path
+	Dockerfile  string
 	Image       string
 	Ports       []string
 	Environment map[string]string
@@ -94,7 +95,7 @@ func SeparateServices(cf *ComposeFile) (infra []InfraService, apps []AppService)
 				Command:     svc.Command,
 				Entrypoint:  svc.Entrypoint,
 			}
-			app.Build = parseBuildContext(svc.Build)
+			app.Build, app.Dockerfile = parseBuild(svc.Build)
 			apps = append(apps, app)
 		}
 	}
@@ -123,21 +124,32 @@ func parseImageTag(image string) (name, version string) {
 	return
 }
 
-func parseBuildContext(build interface{}) string {
+func parseBuild(build interface{}) (context, dockerfile string) {
 	if build == nil {
-		return ""
+		return "", ""
 	}
 	switch v := build.(type) {
 	case string:
-		return v
+		return v, ""
 	case map[string]interface{}:
 		if ctx, ok := v["context"]; ok {
 			if s, ok := ctx.(string); ok {
-				return s
+				context = s
 			}
 		}
+		if dockerfileValue, ok := v["dockerfile"]; ok {
+			if s, ok := dockerfileValue.(string); ok {
+				dockerfile = s
+			}
+		}
+		if context != "" || dockerfile != "" {
+			if context == "" {
+				context = "."
+			}
+			return context, dockerfile
+		}
 	}
-	return "."
+	return ".", ""
 }
 
 func parseEnvironment(env interface{}) map[string]string {

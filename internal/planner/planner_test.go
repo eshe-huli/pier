@@ -37,6 +37,93 @@ func TestPlanProject_ComposeSplitsInfraAndApps(t *testing.T) {
 	assertServiceSpec(t, plan.ServiceSpecs, "redis:7")
 }
 
+func TestPlanProject_ComposeRendersAppPlan(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docker-compose.yml", `services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:3000/tcp"
+    environment:
+      APP_ENV: local
+    volumes:
+      - ./api:/srv/api:cached
+      - named-cache:/cache
+  postgres:
+    image: postgres:16-alpine
+`)
+
+	plan, err := PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	if len(plan.Apps) != 1 {
+		t.Fatalf("got %d app plans, want 1", len(plan.Apps))
+	}
+
+	app := plan.Apps[0]
+	if app.Name != filepath.Base(filepath.Clean(dir)) {
+		t.Fatalf("got app name %q, want project directory name", app.Name)
+	}
+	if app.ComposeName != "api" {
+		t.Fatalf("got compose name %q, want api", app.ComposeName)
+	}
+	if app.BuildContext != filepath.Join(dir, "api") {
+		t.Fatalf("got build context %q, want %q", app.BuildContext, filepath.Join(dir, "api"))
+	}
+	if app.Dockerfile != filepath.Join(dir, "api", "Dockerfile.dev") {
+		t.Fatalf("got dockerfile %q, want %q", app.Dockerfile, filepath.Join(dir, "api", "Dockerfile.dev"))
+	}
+	if app.Port != 3000 {
+		t.Fatalf("got port %d, want 3000", app.Port)
+	}
+	if app.Env["APP_ENV"] != "local" {
+		t.Fatalf("got APP_ENV %q, want local", app.Env["APP_ENV"])
+	}
+	if !app.UseEnvFile {
+		t.Fatal("expected compose build app to use generated env file")
+	}
+	wantVolume := filepath.Join(dir, "api") + ":/srv/api:cached"
+	if len(app.Volumes) != 1 || app.Volumes[0] != wantVolume {
+		t.Fatalf("got volumes %#v, want [%q]", app.Volumes, wantVolume)
+	}
+}
+
+func TestPlanProject_ComposeInfraOnlyRendersDefaultAppPlan(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "Dockerfile", "FROM alpine\n")
+	writeFile(t, dir, "Pierfile", `name: api
+port: 8080
+`)
+	writeFile(t, dir, "docker-compose.yml", `services:
+  postgres:
+    image: postgres:16-alpine
+`)
+
+	plan, err := PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	if len(plan.AppServices) != 0 {
+		t.Fatalf("got %d compose app services, want 0", len(plan.AppServices))
+	}
+	if len(plan.Apps) != 1 {
+		t.Fatalf("got %d app plans, want 1", len(plan.Apps))
+	}
+
+	app := plan.Apps[0]
+	if app.Name != "api" {
+		t.Fatalf("got app name %q, want api", app.Name)
+	}
+	if app.Port != 8080 {
+		t.Fatalf("got port %d, want 8080", app.Port)
+	}
+}
+
 func TestPlanProject_PierfileDefaultsMissingVersions(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "Pierfile", `name: api
@@ -58,6 +145,42 @@ services:
 	}
 	assertServiceSpec(t, plan.ServiceSpecs, "redis:7")
 	assertServiceSpec(t, plan.ServiceSpecs, "postgres:15")
+}
+
+func TestPlanProject_PierfileRendersDefaultAppPlan(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "Dockerfile", "FROM alpine\n")
+	writeFile(t, dir, "Pierfile", `name: api
+port: 8088
+env:
+  APP_ENV: local
+`)
+
+	plan, err := PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	if len(plan.Apps) != 1 {
+		t.Fatalf("got %d app plans, want 1", len(plan.Apps))
+	}
+
+	app := plan.Apps[0]
+	if app.Name != "api" {
+		t.Fatalf("got app name %q, want api", app.Name)
+	}
+	if app.BuildContext != dir {
+		t.Fatalf("got build context %q, want %q", app.BuildContext, dir)
+	}
+	if app.Dockerfile != filepath.Join(dir, "Dockerfile") {
+		t.Fatalf("got dockerfile %q, want %q", app.Dockerfile, filepath.Join(dir, "Dockerfile"))
+	}
+	if app.Port != 8088 {
+		t.Fatalf("got port %d, want 8088", app.Port)
+	}
+	if app.Env["APP_ENV"] != "local" {
+		t.Fatalf("got APP_ENV %q, want local", app.Env["APP_ENV"])
+	}
 }
 
 func TestPlanProject_DetectsFrameworkAndServiceFallback(t *testing.T) {
@@ -85,9 +208,29 @@ func TestPlanProject_DetectsFrameworkAndServiceFallback(t *testing.T) {
 	assertServiceSpec(t, plan.ServiceSpecs, "redis:7")
 }
 
+func TestRuntimeEnvAddsDatabaseIdentity(t *testing.T) {
+	got := RuntimeEnv("my-api", []string{"REDIS_URL=redis://localhost:6379"})
+	want := []string{
+		"REDIS_URL=redis://localhost:6379",
+		"DATABASE_NAME=my_api",
+		"DB_DATABASE=my_api",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d env vars, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got env[%d] %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("creating parent directory for %s: %v", name, err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("writing %s: %v", name, err)
 	}
