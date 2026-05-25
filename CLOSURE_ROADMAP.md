@@ -19,13 +19,15 @@ project files. Docker is the runtime adapter, not the product surface.
 - dnsmasq PID checks now verify that the process actually exists on macOS
   instead of trusting a stale PID file.
 - Tests cover Astro/Remix detection and the generated compose file contract.
+- `pier up` now starts from a tested internal planner that normalizes compose
+  app/infra splits, Pierfile project names, default service versions, and
+  dependency-file service detection before Docker commands run.
 
 ## Next Low-Level Closures
 
-1. Implement the v0.2 `pier up` runtime planner from `docs/SPEC-v0.2.md`:
-   parse Docker Compose when present, share matching Postgres/Redis versions,
-   build only the app service, and inject runtime env without editing project
-   files.
+1. Push the new planner deeper into execution so compose build options,
+   Dockerfile paths, env files, and route names are all rendered from one plan
+   object instead of mixed command-layer logic.
 2. Add a `.pier` manifest writer/reader for detected services, ports, and
    overrides so teams can opt in without forcing adoption.
 3. Add integration tests using fixture projects under an ignored examples

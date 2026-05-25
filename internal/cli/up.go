@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/eshe-huli/pier/internal/compose"
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/detect"
 	"github.com/eshe-huli/pier/internal/docker"
-	"github.com/eshe-huli/pier/internal/infra"
 	"github.com/eshe-huli/pier/internal/gitignore"
+	"github.com/eshe-huli/pier/internal/infra"
 	"github.com/eshe-huli/pier/internal/pierfile"
+	"github.com/eshe-huli/pier/internal/planner"
 	"github.com/eshe-huli/pier/internal/registry"
 	"github.com/eshe-huli/pier/internal/runtime"
 )
@@ -61,43 +61,22 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 
-	// Step 1: Determine project name
-	projectName := filepath.Base(dir)
-	var pf *pierfile.Pierfile
-	if pierfile.Exists(dir) {
-		pf, err = pierfile.Load(dir)
-		if err != nil {
-			return fmt.Errorf("loading Pierfile: %w", err)
-		}
-		if pf.Name != "" {
-			projectName = pf.Name
-		}
+	runPlan, err := planner.PlanProject(dir)
+	if err != nil {
+		return fmt.Errorf("planning project: %w", err)
 	}
+	projectName := runPlan.ProjectName
+	pf := runPlan.Pierfile
 
 	step(1, fmt.Sprintf("Project: %s", cyan(projectName)))
 
 	// Check for docker-compose project
-	cf, composeErr := compose.Parse(dir)
-	if composeErr == nil {
-		return runUpCompose(cmd.Context(), dir, projectName, cf, cfg)
+	if runPlan.ComposeFile != nil {
+		return runUpCompose(cmd.Context(), dir, runPlan, cfg)
 	}
 
 	// Step 2: Detect services
-	var services []string
-	if pf != nil && len(pf.Services) > 0 {
-		services = pf.ServiceNames()
-	} else {
-		detected, _ := detect.DetectServices(dir)
-		for _, d := range detected {
-			svc := d.Name
-			if d.Version != "" {
-				svc += ":" + d.Version
-			} else {
-				svc += ":" + defaultVersion(d.Name)
-			}
-			services = append(services, svc)
-		}
-	}
+	services := runPlan.ServiceSpecs
 
 	// Step 3: Ensure shared infrastructure
 	var sharedServices []infra.SharedService
@@ -267,8 +246,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 }
 
 // runUpCompose handles docker-compose.yml projects
-func runUpCompose(ctx context.Context, dir, projectName string, cf *compose.ComposeFile, cfg *config.Config) error {
-	infraSvcs, appSvcs := compose.SeparateServices(cf)
+func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *config.Config) error {
+	projectName := runPlan.ProjectName
+	infraSvcs := runPlan.InfraServices
+	appSvcs := runPlan.AppServices
 
 	// Ensure shared infra
 	var sharedServices []infra.SharedService
@@ -591,14 +572,7 @@ func runUpBuild(ctx context.Context, dir, projectName string, cfg *config.Config
 }
 
 func defaultVersion(name string) string {
-	defaults := map[string]string{
-		"postgres": "16", "redis": "7", "mongo": "7", "mysql": "8",
-		"minio": "latest", "kafka": "latest", "rabbitmq": "3", "elasticsearch": "8",
-	}
-	if v, ok := defaults[name]; ok {
-		return v
-	}
-	return "latest"
+	return planner.DefaultVersion(name)
 }
 
 func parseFirstPort(ports []string) int {
