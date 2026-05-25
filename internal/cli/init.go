@@ -17,6 +17,7 @@ import (
 	"github.com/eshe-huli/pier/internal/docker"
 	"github.com/eshe-huli/pier/internal/gitignore"
 	"github.com/eshe-huli/pier/internal/pierfile"
+	"github.com/eshe-huli/pier/internal/planner"
 	"github.com/eshe-huli/pier/internal/proxy"
 )
 
@@ -163,6 +164,16 @@ func runProjectInitLogic(dir string) error {
 		return fmt.Errorf("writing Pierfile: %w", err)
 	}
 	fmt.Printf("  📄 Generated: Pierfile\n")
+
+	if plan, err := planner.PlanProject(dir); err == nil {
+		if err := planner.SaveManifest(plan); err != nil {
+			fmt.Printf("  ⚠️  Could not write .pier/manifest.yaml: %s\n", err)
+		} else {
+			fmt.Printf("  📄 Generated: .pier/manifest.yaml\n")
+		}
+	} else {
+		fmt.Printf("  ⚠️  Could not plan project manifest: %s\n", err)
+	}
 
 	// Ensure .pier/ is in .gitignore
 	if err := gitignore.EnsurePierIgnored(dir); err != nil {

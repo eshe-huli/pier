@@ -9,6 +9,7 @@ import (
 
 	"github.com/eshe-huli/pier/internal/compose"
 	"github.com/eshe-huli/pier/internal/detect"
+	"github.com/eshe-huli/pier/internal/manifest"
 	"github.com/eshe-huli/pier/internal/pierfile"
 )
 
@@ -17,6 +18,7 @@ type Source string
 const (
 	SourceCompose   Source = "compose"
 	SourcePierfile  Source = "pierfile"
+	SourceManifest  Source = "manifest"
 	SourceDetection Source = "detection"
 	SourceNone      Source = "none"
 )
@@ -27,6 +29,7 @@ type Plan struct {
 	ProjectName   string
 	Source        Source
 	Pierfile      *pierfile.Pierfile
+	Manifest      *manifest.Manifest
 	Framework     *detect.Framework
 	ComposeFile   *compose.ComposeFile
 	InfraServices []compose.InfraService
@@ -70,6 +73,17 @@ func PlanProject(dir string) (*Plan, error) {
 		}
 	}
 
+	if manifest.Exists(dir) {
+		mf, err := manifest.Load(dir)
+		if err != nil {
+			return nil, fmt.Errorf("loading manifest: %w", err)
+		}
+		plan.Manifest = mf
+		if plan.Pierfile == nil && mf.Project.Name != "" {
+			plan.ProjectName = mf.Project.Name
+		}
+	}
+
 	if fw, err := detect.DetectFramework(dir); err == nil {
 		plan.Framework = fw
 	}
@@ -96,6 +110,16 @@ func PlanProject(dir string) (*Plan, error) {
 		return plan, nil
 	}
 
+	if plan.Manifest != nil && len(plan.Manifest.Services) > 0 {
+		plan.Source = SourceManifest
+		plan.ServiceSpecs = serviceSpecsFromManifest(plan.Manifest.Services)
+		applyManifest(plan, plan.Manifest)
+		return plan, nil
+	}
+	if plan.Manifest != nil {
+		applyManifest(plan, plan.Manifest)
+	}
+
 	detected, err := detect.DetectServices(dir)
 	if err != nil {
 		return nil, fmt.Errorf("detecting services: %w", err)
@@ -104,8 +128,37 @@ func PlanProject(dir string) (*Plan, error) {
 		plan.Source = SourceDetection
 		plan.ServiceSpecs = serviceSpecsFromDetected(detected)
 	}
+	if plan.Source == SourceNone && plan.Manifest != nil && manifestHasAppPlan(plan.Manifest) {
+		plan.Source = SourceManifest
+	}
 
 	return plan, nil
+}
+
+func SaveManifest(plan *Plan) error {
+	return manifest.Save(plan.Dir, ManifestFromPlan(plan))
+}
+
+func ManifestFromPlan(plan *Plan) *manifest.Manifest {
+	mf := &manifest.Manifest{
+		Source: string(plan.Source),
+		Project: manifest.Project{
+			Name: plan.ProjectName,
+		},
+		Services: manifestServicesFromSpecs(plan.ServiceSpecs),
+	}
+
+	for _, app := range plan.Apps {
+		mf.Apps = append(mf.Apps, manifest.App{
+			Name: app.Name,
+			Port: app.Port,
+			Overrides: manifest.Overrides{
+				Env: copyEnv(app.Env),
+			},
+		})
+	}
+
+	return mf
 }
 
 // RuntimeEnv appends Pier's runtime database identity to service connection env.
@@ -118,6 +171,33 @@ func RuntimeEnv(projectName string, envOverrides []string) []string {
 		fmt.Sprintf("DB_DATABASE=%s", dbName),
 	)
 	return envs
+}
+
+func manifestHasAppPlan(mf *manifest.Manifest) bool {
+	return len(mf.Apps) > 0
+}
+
+func applyManifest(plan *Plan, mf *manifest.Manifest) {
+	if len(plan.Apps) == 0 {
+		plan.Apps = []AppPlan{defaultAppPlan(plan.Dir, plan.ProjectName, plan.Pierfile, plan.Framework)}
+	}
+	if len(mf.Apps) == 0 {
+		return
+	}
+
+	app := plan.Apps[0]
+	manifestApp := mf.Apps[0]
+	if manifestApp.Name != "" {
+		app.Name = manifestApp.Name
+		app.Image = manifestApp.Name
+	}
+	if manifestApp.Port > 0 {
+		app.Port = manifestApp.Port
+	}
+	if len(manifestApp.Overrides.Env) > 0 {
+		app.Env = copyEnv(manifestApp.Overrides.Env)
+	}
+	plan.Apps[0] = app
 }
 
 func appPlansFromCompose(dir, projectName string, services []compose.AppService) []AppPlan {
@@ -275,6 +355,18 @@ func serviceSpecsFromPierfile(services []pierfile.ServiceEntry) []string {
 	return specs
 }
 
+func serviceSpecsFromManifest(services []manifest.Service) []string {
+	specs := make([]string, 0, len(services))
+	for _, service := range services {
+		version := service.Version
+		if version == "" {
+			version = DefaultVersion(service.Name)
+		}
+		specs = append(specs, pierfile.FormatService(service.Name, version))
+	}
+	return specs
+}
+
 func serviceSpecsFromDetected(services []detect.ServiceDep) []string {
 	specs := make([]string, 0, len(services))
 	for _, service := range services {
@@ -285,6 +377,19 @@ func serviceSpecsFromDetected(services []detect.ServiceDep) []string {
 		specs = append(specs, pierfile.FormatService(service.Name, version))
 	}
 	return specs
+}
+
+func manifestServicesFromSpecs(specs []string) []manifest.Service {
+	services := make([]manifest.Service, 0, len(specs))
+	for _, spec := range specs {
+		parts := strings.SplitN(spec, ":", 2)
+		service := manifest.Service{Name: parts[0]}
+		if len(parts) > 1 {
+			service.Version = parts[1]
+		}
+		services = append(services, service)
+	}
+	return services
 }
 
 func DefaultVersion(name string) string {

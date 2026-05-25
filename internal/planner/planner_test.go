@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/eshe-huli/pier/internal/manifest"
 )
 
 func TestPlanProject_ComposeSplitsInfraAndApps(t *testing.T) {
@@ -183,6 +185,87 @@ env:
 	}
 }
 
+func TestPlanProject_ManifestOverridesDetection(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "package.json", `{
+  "dependencies": {
+    "pg": "^8.0.0",
+    "ioredis": "^5.0.0"
+  }
+}`)
+	writeFile(t, dir, ".pier/manifest.yaml", `version: 1
+source: detection
+project:
+  name: api
+services:
+  - name: postgres
+    version: "15"
+apps:
+  - name: api
+    port: 8088
+    overrides:
+      env:
+        APP_ENV: local
+`)
+
+	plan, err := PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	if plan.Source != SourceManifest {
+		t.Fatalf("got source %q, want %q", plan.Source, SourceManifest)
+	}
+	if plan.ProjectName != "api" {
+		t.Fatalf("got project name %q, want api", plan.ProjectName)
+	}
+	assertServiceSpec(t, plan.ServiceSpecs, "postgres:15")
+	assertNoServiceSpec(t, plan.ServiceSpecs, "redis:7")
+
+	if len(plan.Apps) != 1 {
+		t.Fatalf("got %d app plans, want 1", len(plan.Apps))
+	}
+	app := plan.Apps[0]
+	if app.Name != "api" {
+		t.Fatalf("got app name %q, want api", app.Name)
+	}
+	if app.Port != 8088 {
+		t.Fatalf("got port %d, want 8088", app.Port)
+	}
+	if app.Env["APP_ENV"] != "local" {
+		t.Fatalf("got APP_ENV %q, want local", app.Env["APP_ENV"])
+	}
+}
+
+func TestPlanProject_ManifestAppOverridesDoNotSuppressDetection(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "package.json", `{
+  "dependencies": {
+    "pg": "^8.0.0"
+  }
+}`)
+	writeFile(t, dir, ".pier/manifest.yaml", `version: 1
+project:
+  name: api
+apps:
+  - name: api
+    port: 8088
+`)
+
+	plan, err := PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	if plan.Source != SourceDetection {
+		t.Fatalf("got source %q, want %q", plan.Source, SourceDetection)
+	}
+	assertServiceSpec(t, plan.ServiceSpecs, "postgres:16")
+	if len(plan.Apps) != 1 || plan.Apps[0].Port != 8088 {
+		t.Fatalf("got app plans %#v, want port 8088", plan.Apps)
+	}
+}
+
 func TestPlanProject_DetectsFrameworkAndServiceFallback(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "package.json", `{
@@ -206,6 +289,46 @@ func TestPlanProject_DetectsFrameworkAndServiceFallback(t *testing.T) {
 	}
 	assertServiceSpec(t, plan.ServiceSpecs, "postgres:16")
 	assertServiceSpec(t, plan.ServiceSpecs, "redis:7")
+}
+
+func TestSaveManifestWritesPlanSummary(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "Pierfile", `name: api
+services:
+  - postgres:15
+port: 8088
+env:
+  APP_ENV: local
+`)
+
+	plan, err := PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+	if err := SaveManifest(plan); err != nil {
+		t.Fatalf("SaveManifest returned error: %v", err)
+	}
+
+	got, err := manifest.Load(dir)
+	if err != nil {
+		t.Fatalf("manifest.Load returned error: %v", err)
+	}
+
+	if got.Source != "pierfile" {
+		t.Fatalf("got source %q, want pierfile", got.Source)
+	}
+	if got.Project.Name != "api" {
+		t.Fatalf("got project name %q, want api", got.Project.Name)
+	}
+	if len(got.Services) != 1 || got.Services[0].Name != "postgres" || got.Services[0].Version != "15" {
+		t.Fatalf("got services %#v, want postgres:15", got.Services)
+	}
+	if len(got.Apps) != 1 || got.Apps[0].Port != 8088 {
+		t.Fatalf("got apps %#v, want port 8088", got.Apps)
+	}
+	if got.Apps[0].Overrides.Env["APP_ENV"] != "local" {
+		t.Fatalf("got APP_ENV %q, want local", got.Apps[0].Overrides.Env["APP_ENV"])
+	}
 }
 
 func TestRuntimeEnvAddsDatabaseIdentity(t *testing.T) {
@@ -244,4 +367,13 @@ func assertServiceSpec(t *testing.T, specs []string, want string) {
 		}
 	}
 	t.Fatalf("expected service spec %q in %v", want, specs)
+}
+
+func assertNoServiceSpec(t *testing.T, specs []string, want string) {
+	t.Helper()
+	for _, spec := range specs {
+		if spec == want {
+			t.Fatalf("did not expect service spec %q in %v", want, specs)
+		}
+	}
 }

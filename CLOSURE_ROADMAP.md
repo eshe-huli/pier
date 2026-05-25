@@ -24,17 +24,17 @@ project files. Docker is the runtime adapter, not the product surface.
   dependency-file service detection before Docker commands run.
 - `pier up` app execution now consumes planner-rendered app plans for compose
   build contexts, Dockerfile paths, route names, ports, env, and bind mounts.
+- `.pier/manifest.yaml` now records project-local plan details and can feed
+  planner service, port, and env overrides without changing committed files.
 
 ## Next Low-Level Closures
 
-1. Add a `.pier` manifest writer/reader for detected services, ports, and
-   overrides so teams can opt in without forcing adoption.
-2. Add integration tests using fixture projects under an ignored examples
+1. Add integration tests using fixture projects under an ignored examples
    directory to prove Next, Nest, Astro, Remix, Rails, Go, Django/FastAPI, and
    Laravel all route to `*.dock`.
-3. Decide whether Nginx remains required or whether Traefik can bind directly
+2. Decide whether Nginx remains required or whether Traefik can bind directly
    to port 80 with a clearer sudo/manual step.
-4. Add upgrade handling for existing non-compose Pier infrastructure so users
+3. Add upgrade handling for existing non-compose Pier infrastructure so users
    can move from v0.1 to v0.2 without orphaned containers.
 
 ## Verification Gates

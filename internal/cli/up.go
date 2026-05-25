@@ -64,6 +64,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("planning project: %w", err)
 	}
+	savePlanManifest(runPlan)
 	projectName := runPlan.ProjectName
 
 	step(1, fmt.Sprintf("Project: %s", cyan(projectName)))
@@ -337,6 +338,12 @@ func runUpBuild(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, 
 	_ = registry.Register(registry.Project{Name: projectName, Dir: runPlan.Dir, Type: "docker"})
 
 	return nil
+}
+
+func savePlanManifest(runPlan *planner.Plan) {
+	if err := planner.SaveManifest(runPlan); err != nil {
+		warn(fmt.Sprintf("Could not write .pier/manifest.yaml: %s", err))
+	}
 }
 
 func buildAppImage(runPlan *planner.Plan, app planner.AppPlan) error {
