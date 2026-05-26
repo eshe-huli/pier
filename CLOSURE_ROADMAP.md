@@ -54,6 +54,9 @@ project files. Docker is the runtime adapter, not the product surface.
 - `pier up --runtime process` now supports docker-compose projects whose app
   service declares an explicit `command`, reusing Pier shared infra while
   running the app itself as a host process.
+- Compose process commands now execute from the service build context, so
+  monorepo services such as `build: ./api` run their dev command in the
+  expected working directory.
 
 ## Next Low-Level Closures
 

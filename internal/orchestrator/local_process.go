@@ -236,7 +236,7 @@ func startLocalProcess(spec AppSpec, command string, port int, envOverrides []st
 	}
 
 	cmd := exec.Command("sh", "-lc", command)
-	cmd.Dir = spec.Dir
+	cmd.Dir = localProcessBuildDir(spec)
 	cmd.Env = localProcessEnv(os.Environ(), spec, envOverrides, port)
 	cmd.Stdout = log
 	cmd.Stderr = log
