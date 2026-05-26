@@ -74,6 +74,34 @@ func TestPierUpDryRunShowsProcessRuntime(t *testing.T) {
 	}
 }
 
+func TestPierUpProcessDryRunSuggestsDoctorForMissingDependency(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestFile(t, dir, "api/build.gradle", `plugins { id "org.springframework.boot" version "3.3.0" }`)
+	writeTestFile(t, dir, "docker-compose.yml", `services:
+  api:
+    build: ./api
+`)
+	chdir(t, dir)
+
+	restore := setUpGlobalsForTest()
+	defer restore()
+	upDryRun = true
+	upRuntime = "process"
+
+	output := captureStdout(t, func() {
+		if err := runUp(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("runUp returned error: %v", err)
+		}
+	})
+
+	assertOutputContains(t, output, "command=./gradlew bootRun")
+	assertOutputContains(t, output, "Missing process dependency")
+	assertOutputContains(t, output, "Add ./gradlew")
+	assertOutputContains(t, output, "pier doctor process")
+}
+
 func TestPierUpDryRunCanForceDockerRuntime(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()

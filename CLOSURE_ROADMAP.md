@@ -71,12 +71,15 @@ project files. Docker is the runtime adapter, not the product surface.
 - `pier doctor process` now explains inferred process commands and missing host
   executables or project-local wrappers before the user hits shell startup
   errors.
+- `pier up --runtime process --dry-run` now checks inferred process command
+  dependencies and suggests `pier doctor process` when a required executable or
+  wrapper is missing.
 
 ## Next Low-Level Closures
 
-1. Add a first-run `pier up --runtime process --dry-run` hint that suggests
-   `pier doctor process` when an inferred command depends on a missing host
-   executable.
+1. Validate process-runtime startup behavior across the fixture apps on a clean
+   machine image, especially command dependency installs and route restoration
+   after restart.
 
 ## Verification Gates
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -375,6 +376,7 @@ func printUpDryRun(runPlan *planner.Plan, cfg *config.Config, runtimeAdapter orc
 	fmt.Printf("  Project: %s\n", cyan(runPlan.ProjectName))
 	fmt.Printf("  Source:  %s\n", cyan(string(runPlan.Source)))
 	fmt.Printf("  Runtime: %s\n", cyan(runtimeAdapter.Name()))
+	var missingProcessDependencies []checkResult
 
 	if len(runPlan.ServiceSpecs) > 0 {
 		fmt.Println()
@@ -407,8 +409,13 @@ func printUpDryRun(runPlan *planner.Plan, cfg *config.Config, runtimeAdapter orc
 				if port == 0 && runPlan.Framework != nil {
 					port = runPlan.Framework.Port
 				}
-				if command := orchestrator.LocalProcessCommand(appSpecFromPlan(runPlan, app), port); command != "" {
+				spec := appSpecFromPlan(runPlan, app)
+				if command := orchestrator.LocalProcessCommand(spec, port); command != "" {
 					fmt.Printf(" command=%s", command)
+					dependency := processCommandDependency(command, processBuildDir(spec), exec.LookPath, os.Stat)
+					if !dependency.OK {
+						missingProcessDependencies = append(missingProcessDependencies, dependency)
+					}
 				}
 			}
 			fmt.Println()
@@ -418,6 +425,18 @@ func printUpDryRun(runPlan *planner.Plan, cfg *config.Config, runtimeAdapter orc
 	if runPlan.Framework != nil {
 		fmt.Println()
 		fmt.Printf("  Framework: %s (%s)\n", cyan(runPlan.Framework.Name), runPlan.Framework.Language)
+	}
+
+	if len(missingProcessDependencies) > 0 {
+		fmt.Println()
+		fmt.Println("  Missing process dependency:")
+		for _, dependency := range missingProcessDependencies {
+			fmt.Printf("    - %s: %s\n", dependency.Name, dependency.Detail)
+			if dependency.Fix != "" {
+				fmt.Printf("      Fix: %s\n", dependency.Fix)
+			}
+		}
+		fmt.Println("    Run pier doctor process for a full local process check.")
 	}
 
 	fmt.Println()
