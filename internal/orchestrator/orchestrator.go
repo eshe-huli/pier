@@ -34,6 +34,7 @@ type AppSpec struct {
 	EnvFile                 string            // Optional --env-file path
 	RuntimeEnvLast          bool              // Append env overrides after app env
 	Volumes                 []string          // Volume mounts
+	WorkingDir              string            // Optional container/process working directory
 	Entrypoint              interface{}       // Override entrypoint
 	Command                 interface{}       // Override CMD
 	Route                   bool              // Add Traefik labels
@@ -222,6 +223,10 @@ func DockerRunArgs(spec AppSpec, image string, port int, cfg *config.Config, env
 		dockerArgs = appendEnvList(dockerArgs, envOverrides)
 		dockerArgs = appendEnvMap(dockerArgs, spec.Env)
 		dockerArgs = appendExtraEnv(dockerArgs, spec.ExtraEnv)
+	}
+
+	if spec.WorkingDir != "" {
+		dockerArgs = append(dockerArgs, "-w", spec.WorkingDir)
 	}
 
 	if spec.Route {

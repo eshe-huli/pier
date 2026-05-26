@@ -19,9 +19,12 @@ type ComposeService struct {
 	Image       string      `yaml:"image"`
 	Build       interface{} `yaml:"build"`
 	Ports       []string    `yaml:"ports"`
+	Expose      interface{} `yaml:"expose"`
+	EnvFile     interface{} `yaml:"env_file"`
 	Environment interface{} `yaml:"environment"`
 	DependsOn   interface{} `yaml:"depends_on"`
 	Volumes     []string    `yaml:"volumes"`
+	WorkingDir  string      `yaml:"working_dir"`
 	Command     interface{} `yaml:"command"`
 	Entrypoint  interface{} `yaml:"entrypoint"`
 }
@@ -41,8 +44,11 @@ type AppService struct {
 	Dockerfile  string
 	Image       string
 	Ports       []string
+	Expose      []string
+	EnvFiles    []string
 	Environment map[string]string
 	Volumes     []string
+	WorkingDir  string
 	Command     interface{} // entrypoint/command override
 	Entrypoint  interface{}
 }
@@ -90,8 +96,11 @@ func SeparateServices(cf *ComposeFile) (infra []InfraService, apps []AppService)
 				ComposeName: name,
 				Image:       svc.Image,
 				Ports:       svc.Ports,
+				Expose:      parseStringList(svc.Expose),
+				EnvFiles:    parseStringList(svc.EnvFile),
 				Environment: parseEnvironment(svc.Environment),
 				Volumes:     svc.Volumes,
+				WorkingDir:  svc.WorkingDir,
 				Command:     svc.Command,
 				Entrypoint:  svc.Entrypoint,
 			}
@@ -173,6 +182,33 @@ func parseEnvironment(env interface{}) map[string]string {
 		}
 	}
 	return result
+}
+
+func parseStringList(value interface{}) []string {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return []string{v}
+	case []interface{}:
+		items := make([]string, 0, len(v))
+		for _, item := range v {
+			itemText := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if itemText != "" {
+				items = append(items, itemText)
+			}
+		}
+		return items
+	default:
+		itemText := strings.TrimSpace(fmt.Sprintf("%v", value))
+		if itemText == "" {
+			return nil
+		}
+		return []string{itemText}
+	}
 }
 
 // resolveEnvVar resolves ${VAR:-default} and ${VAR} patterns

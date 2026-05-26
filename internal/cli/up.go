@@ -475,6 +475,7 @@ func appSpecFromPlan(runPlan *planner.Plan, app planner.AppPlan) orchestrator.Ap
 		Port:                    app.Port,
 		Env:                     app.Env,
 		Volumes:                 app.Volumes,
+		WorkingDir:              app.WorkingDir,
 		Entrypoint:              app.Entrypoint,
 		Command:                 app.Command,
 	}

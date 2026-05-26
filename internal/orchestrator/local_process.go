@@ -177,6 +177,9 @@ func localProcessBuildDir(spec AppSpec) string {
 			buildDir = filepath.Join(spec.Dir, buildDir)
 		}
 	}
+	if spec.WorkingDir != "" && !filepath.IsAbs(spec.WorkingDir) {
+		buildDir = filepath.Join(buildDir, spec.WorkingDir)
+	}
 	return buildDir
 }
 

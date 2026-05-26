@@ -153,6 +153,63 @@ func TestRunUpComposeProcessRuntimeKeepsMultiAppState(t *testing.T) {
 	}
 }
 
+func TestRunUpComposeProcessRuntimeHonorsComposeExecutionDetails(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	observedCWD := filepath.Join(t.TempDir(), "cwd.txt")
+	observedEnv := filepath.Join(t.TempDir(), "env.txt")
+	t.Setenv("HOME", home)
+	writeTestFile(t, dir, "api/.env.local", "APP_ENV=from-env-file\n")
+	writeTestFile(t, dir, "docker-compose.yml", `services:
+  api:
+    build: .
+    working_dir: ./api
+    env_file:
+      - ./api/.env.local
+    command: "pwd > `+observedCWD+` && printf %s \"$APP_ENV\" > `+observedEnv+`"
+    expose:
+      - "4010"
+`)
+
+	plan, err := planner.PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	cfg := config.Default()
+	if err := runUpCompose(
+		context.Background(),
+		dir,
+		plan,
+		cfg,
+		orchestrator.LocalProcessAdapter{},
+	); err != nil {
+		t.Fatalf("runUpCompose returned error: %v", err)
+	}
+
+	gotCWD := cleanRealPath(t, waitForTrimmedFile(t, observedCWD))
+	wantCWD := cleanRealPath(t, filepath.Join(dir, "api"))
+	if gotCWD != wantCWD {
+		t.Fatalf("expected process command to run from working_dir %q, got %q", wantCWD, gotCWD)
+	}
+
+	if gotEnv := waitForTrimmedFile(t, observedEnv); gotEnv != "from-env-file" {
+		t.Fatalf("expected env_file variable %q, got %q", "from-env-file", gotEnv)
+	}
+
+	projectName := filepath.Base(filepath.Clean(dir))
+	meta, found, err := orchestrator.ResolveLocalProcessMeta(projectName)
+	if err != nil {
+		t.Fatalf("ResolveLocalProcessMeta returned error: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected local process metadata for %s", projectName)
+	}
+	if meta.Port != 4010 {
+		t.Fatalf("expected exposed port 4010, got %d", meta.Port)
+	}
+}
+
 func cleanRealPath(t *testing.T, path string) string {
 	t.Helper()
 

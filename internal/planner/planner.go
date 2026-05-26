@@ -47,7 +47,9 @@ type AppPlan struct {
 	Image        string
 	Port         int
 	Env          map[string]string
+	EnvFiles     []string
 	Volumes      []string
+	WorkingDir   string
 	Command      interface{}
 	Entrypoint   interface{}
 	UseEnvFile   bool
@@ -226,15 +228,28 @@ func appPlansFromCompose(dir, projectName string, services []compose.AppService)
 			image = service.Image
 		}
 
+		port := compose.ParseFirstPort(service.Ports)
+		if port == 0 {
+			port = compose.ParseFirstPort(service.Expose)
+		}
+
+		envFiles := resolveComposeEnvFiles(dir, service.EnvFiles)
+		env := envFromComposeFiles(envFiles)
+		for key, value := range service.Environment {
+			env[key] = value
+		}
+
 		apps = append(apps, AppPlan{
 			Name:         appName,
 			ComposeName:  service.ComposeName,
 			BuildContext: buildContext,
 			Dockerfile:   resolveDockerfile(buildContext, service.Dockerfile),
 			Image:        image,
-			Port:         compose.ParseFirstPort(service.Ports),
-			Env:          copyEnv(service.Environment),
+			Port:         port,
+			Env:          env,
+			EnvFiles:     envFiles,
 			Volumes:      resolveBindVolumes(dir, service.Volumes),
+			WorkingDir:   service.WorkingDir,
 			Command:      service.Command,
 			Entrypoint:   service.Entrypoint,
 			UseEnvFile:   service.Build != "",
@@ -303,6 +318,54 @@ func resolveDockerfile(buildContext, dockerfile string) string {
 		return filepath.Clean(dockerfile)
 	}
 	return resolvePath(buildContext, dockerfile)
+}
+
+func resolveComposeEnvFiles(dir string, envFiles []string) []string {
+	resolved := make([]string, 0, len(envFiles))
+	for _, envFile := range envFiles {
+		envFile = strings.TrimSpace(envFile)
+		if envFile == "" {
+			continue
+		}
+		resolved = append(resolved, resolvePath(dir, envFile))
+	}
+	return resolved
+}
+
+func envFromComposeFiles(envFiles []string) map[string]string {
+	env := map[string]string{}
+	for _, envFile := range envFiles {
+		data, err := os.ReadFile(envFile)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			line = strings.TrimPrefix(line, "export ")
+			key, value, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			env[key] = resolveEnvFileValue(strings.TrimSpace(value))
+		}
+	}
+	return env
+}
+
+func resolveEnvFileValue(value string) string {
+	if len(value) >= 2 {
+		if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+			value = value[1 : len(value)-1]
+		}
+	}
+	return value
 }
 
 func existingDockerfile(dir string) string {
