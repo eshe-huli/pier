@@ -202,6 +202,12 @@ func TestDevCommandForFramework(t *testing.T) {
 			want: "php artisan serve --port=8000",
 		},
 		{
+			name: "spring boot gradle",
+			fw:   &detect.Framework{Name: "spring-boot", Language: "java-gradle"},
+			port: 8080,
+			want: "./gradlew bootRun",
+		},
+		{
 			name: "unknown",
 			fw:   &detect.Framework{Name: "unknown"},
 			port: 9000,
@@ -233,6 +239,94 @@ func TestLocalProcessCommandPrefersPierfileCommand(t *testing.T) {
 
 	if got != "npm run dev -- --host 0.0.0.0" {
 		t.Fatalf("LocalProcessCommand() = %q", got)
+	}
+}
+
+func TestLocalProcessCommandInfersComposeBuildContextFrameworks(t *testing.T) {
+	tests := []struct {
+		name        string
+		file        string
+		content     string
+		wantCommand string
+		wantPort    int
+	}{
+		{
+			name:        "rails",
+			file:        "Gemfile",
+			content:     `gem "rails", "~> 7.1"`,
+			wantCommand: "rails server -p 3000",
+			wantPort:    3000,
+		},
+		{
+			name:        "django pyproject",
+			file:        "pyproject.toml",
+			content:     `[project]\ndependencies = ["django>=5.0"]`,
+			wantCommand: "python manage.py runserver 0.0.0.0:8000",
+			wantPort:    8000,
+		},
+		{
+			name:        "fastapi pyproject",
+			file:        "pyproject.toml",
+			content:     `[project]\ndependencies = ["fastapi>=0.110"]`,
+			wantCommand: "uvicorn main:app --reload --port 8000",
+			wantPort:    8000,
+		},
+		{
+			name:        "laravel",
+			file:        "composer.json",
+			content:     `{"require":{"laravel/framework":"^11.0"}}`,
+			wantCommand: "php artisan serve --port=8000",
+			wantPort:    8000,
+		},
+		{
+			name:        "go",
+			file:        "go.mod",
+			content:     "module example.com/api\n\ngo 1.22\n",
+			wantCommand: "go run .",
+			wantPort:    8080,
+		},
+		{
+			name:        "rust",
+			file:        "Cargo.toml",
+			content:     `[package]\nname = "api"\nversion = "0.1.0"`,
+			wantCommand: "cargo run",
+			wantPort:    8080,
+		},
+		{
+			name:        "phoenix",
+			file:        "mix.exs",
+			content:     `defp deps do\n  [{:phoenix, "~> 1.7"}]\nend`,
+			wantCommand: "mix phx.server",
+			wantPort:    4000,
+		},
+		{
+			name:        "spring boot gradle",
+			file:        "build.gradle",
+			content:     `plugins { id "org.springframework.boot" version "3.3.0" }`,
+			wantCommand: "./gradlew bootRun",
+			wantPort:    8080,
+		},
+	}
+
+	adapter := LocalProcessAdapter{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			buildDir := filepath.Join(dir, "api")
+			writeOrchestratorTestFile(t, buildDir, tt.file, tt.content)
+			spec := AppSpec{Name: "api", Dir: dir, BuildCtx: "./api"}
+
+			_, port, err := adapter.BuildImage(context.Background(), spec)
+			if err != nil {
+				t.Fatalf("BuildImage returned error: %v", err)
+			}
+			if port != tt.wantPort {
+				t.Fatalf("port = %d, want %d", port, tt.wantPort)
+			}
+			if got := LocalProcessCommand(spec, port); got != tt.wantCommand {
+				t.Fatalf("LocalProcessCommand() = %q, want %q", got, tt.wantCommand)
+			}
+		})
 	}
 }
 

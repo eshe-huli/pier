@@ -123,6 +123,11 @@ pier up --runtime process     # Run compose app services with an explicit
                                # framework command as host processes
 ```
 
+Compose process mode infers host commands from app build contexts for common
+frameworks including Rails, Django, FastAPI, Laravel, Go, Rust, Phoenix, and
+Spring Boot. Python `pyproject.toml` projects and Gradle Spring Boot projects
+are covered alongside the older requirements.txt/Maven paths.
+
 ## How It Works
 
 ```

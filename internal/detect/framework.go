@@ -43,10 +43,10 @@ func DetectFramework(dir string) (*Framework, error) {
 	}
 
 	// Python
-	if fileContains(dir, "requirements.txt", "django") {
+	if fileContains(dir, "requirements.txt", "django") || fileContains(dir, "pyproject.toml", "django") {
 		return &Framework{"django", "python", 8000}, nil
 	}
-	if fileContains(dir, "requirements.txt", "fastapi") {
+	if fileContains(dir, "requirements.txt", "fastapi") || fileContains(dir, "pyproject.toml", "fastapi") {
 		return &Framework{"fastapi", "python", 8000}, nil
 	}
 	if fileContains(dir, "requirements.txt", "flask") {
@@ -76,6 +76,9 @@ func DetectFramework(dir string) (*Framework, error) {
 	// Java
 	if fileContains(dir, "pom.xml", "spring-boot") {
 		return &Framework{"spring-boot", "java", 8080}, nil
+	}
+	if fileContains(dir, "build.gradle", "org.springframework.boot") || fileContains(dir, "build.gradle.kts", "org.springframework.boot") {
+		return &Framework{"spring-boot", "java-gradle", 8080}, nil
 	}
 
 	return nil, os.ErrNotExist

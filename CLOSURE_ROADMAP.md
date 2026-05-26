@@ -65,13 +65,13 @@ project files. Docker is the runtime adapter, not the product surface.
 - Compose process mode can now infer a safe host command from a service build
   context with a known framework, while still refusing commandless services that
   do not have a detectable framework or Pierfile command.
+- Process command inference now has driver coverage for Rails, Django/FastAPI
+  pyproject projects, Laravel, Go, Rust, Phoenix, and Gradle Spring Boot compose
+  build contexts.
 
 ## Next Low-Level Closures
 
-1. Expand framework-specific process-mode command inference with driver tests
-   for Rails, Django/FastAPI, Laravel, Go, Rust, Phoenix, and Spring Boot
-   compose build contexts.
-2. Add a `pier doctor process` check that explains missing host dependencies
+1. Add a `pier doctor process` check that explains missing host dependencies
    for inferred commands before users hit runtime shell errors.
 
 ## Verification Gates

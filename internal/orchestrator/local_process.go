@@ -120,6 +120,9 @@ func DevCommandForFramework(fw *detect.Framework, port int) string {
 	case "laravel":
 		return fmt.Sprintf("php artisan serve --port=%d", port)
 	case "spring-boot":
+		if fw.Language == "java-gradle" {
+			return "./gradlew bootRun"
+		}
 		return "./mvnw spring-boot:run"
 	case "rust":
 		return "cargo run"

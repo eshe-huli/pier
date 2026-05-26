@@ -83,6 +83,56 @@ func TestDetectFramework_Laravel(t *testing.T) {
 	}
 }
 
+func TestDetectFramework_PythonPyproject(t *testing.T) {
+	tests := []struct {
+		name string
+		dep  string
+		want string
+	}{
+		{name: "django", dep: "django>=5.0", want: "django"},
+		{name: "fastapi", dep: "fastapi>=0.110", want: "fastapi"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "pyproject.toml", `[project]
+dependencies = ["`+tt.dep+`"]
+`)
+
+			fw, err := DetectFramework(dir)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if fw.Name != tt.want {
+				t.Errorf("got framework %q, want %s", fw.Name, tt.want)
+			}
+			if fw.Port != 8000 {
+				t.Errorf("got port %d, want 8000", fw.Port)
+			}
+		})
+	}
+}
+
+func TestDetectFramework_SpringBootGradle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "build.gradle", `plugins { id "org.springframework.boot" version "3.3.0" }`)
+
+	fw, err := DetectFramework(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fw.Name != "spring-boot" {
+		t.Errorf("got framework %q, want spring-boot", fw.Name)
+	}
+	if fw.Language != "java-gradle" {
+		t.Errorf("got language %q, want java-gradle", fw.Language)
+	}
+	if fw.Port != 8080 {
+		t.Errorf("got port %d, want 8080", fw.Port)
+	}
+}
+
 func TestDetectFramework_Go(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", `module example.com/myapp
