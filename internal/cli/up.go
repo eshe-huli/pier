@@ -252,10 +252,6 @@ func runUpComposeProcess(ctx context.Context, runPlan *planner.Plan, cfg *config
 	envOverrides := planner.RuntimeEnv(projectName, runtime.BuildEnvOverrides(sharedServices))
 
 	for i, app := range apps {
-		if !hasComposeProcessCommand(app) {
-			return fmt.Errorf("process runtime for compose app %q requires an explicit command; add command: to docker-compose.yml or use the default docker runtime", app.ComposeName)
-		}
-
 		spec := appSpecFromPlan(runPlan, app)
 		spec.RuntimeEnvLast = true
 		spec.Route = true
@@ -265,6 +261,9 @@ func runUpComposeProcess(ctx context.Context, runPlan *planner.Plan, cfg *config
 		image, port, err := runtimeAdapter.BuildImage(ctx, spec)
 		if err != nil {
 			return fmt.Errorf("resolving %s: %w", app.Name, err)
+		}
+		if command := orchestrator.LocalProcessCommand(spec, port); command == "" {
+			return fmt.Errorf("process runtime for compose app %q requires a known dev command; add command: to docker-compose.yml, add a Pierfile command, or use the default docker runtime", app.ComposeName)
 		}
 		if err := runtimeAdapter.RunApp(ctx, spec, image, port, cfg, envOverrides); err != nil {
 			return fmt.Errorf("running %s: %w", app.Name, err)
@@ -291,19 +290,6 @@ func runUpComposeProcess(ctx context.Context, runPlan *planner.Plan, cfg *config
 	}
 
 	return nil
-}
-
-func hasComposeProcessCommand(app planner.AppPlan) bool {
-	switch command := app.Command.(type) {
-	case string:
-		return strings.TrimSpace(command) != ""
-	case []string:
-		return len(command) > 0
-	case []interface{}:
-		return len(command) > 0
-	default:
-		return false
-	}
 }
 
 // runUpBuild handles the default build+run path from a planner app plan.

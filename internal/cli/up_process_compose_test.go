@@ -88,6 +88,83 @@ func TestRunUpComposeProcessRuntimeRunsCommandFromBuildContext(t *testing.T) {
 	}
 }
 
+func TestRunUpComposeProcessRuntimeInfersKnownFrameworkCommand(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestFile(t, dir, "api/package.json", `{
+  "scripts": { "start:dev": "true" },
+  "dependencies": { "@nestjs/core": "10.0.0" }
+}`)
+	writeTestFile(t, dir, "docker-compose.yml", `services:
+  api:
+    build: ./api
+`)
+
+	plan, err := planner.PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	cfg := config.Default()
+	if err := runUpCompose(
+		context.Background(),
+		dir,
+		plan,
+		cfg,
+		orchestrator.LocalProcessAdapter{},
+	); err != nil {
+		t.Fatalf("runUpCompose returned error: %v", err)
+	}
+
+	projectName := filepath.Base(filepath.Clean(dir))
+	meta, found, err := orchestrator.ResolveLocalProcessMeta(projectName)
+	if err != nil {
+		t.Fatalf("ResolveLocalProcessMeta returned error: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected local process metadata for %s", projectName)
+	}
+	if meta.Command != "npm run start:dev" {
+		t.Fatalf("expected inferred NestJS command, got %q", meta.Command)
+	}
+	if meta.Port != 3000 {
+		t.Fatalf("expected inferred NestJS port 3000, got %d", meta.Port)
+	}
+}
+
+func TestRunUpComposeProcessRuntimeRejectsUnknownCommandlessApp(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestFile(t, dir, "docker-compose.yml", `services:
+  api:
+    image: busybox
+    ports:
+      - "3000:3000"
+`)
+
+	plan, err := planner.PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	cfg := config.Default()
+	err = runUpCompose(
+		context.Background(),
+		dir,
+		plan,
+		cfg,
+		orchestrator.LocalProcessAdapter{},
+	)
+	if err == nil {
+		t.Fatal("expected commandless process-mode compose app to be rejected")
+	}
+	if !strings.Contains(err.Error(), "requires a known dev command") {
+		t.Fatalf("expected known dev command error, got %v", err)
+	}
+}
+
 func TestRunUpComposeProcessRuntimeKeepsMultiAppState(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()

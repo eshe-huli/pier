@@ -62,11 +62,17 @@ project files. Docker is the runtime adapter, not the product surface.
 - `pier up` now auto-selects the process runtime for detected non-compose app
   projects with known framework/Pierfile commands, while `--runtime docker`
   remains available as an explicit escape hatch.
+- Compose process mode can now infer a safe host command from a service build
+  context with a known framework, while still refusing commandless services that
+  do not have a detectable framework or Pierfile command.
 
 ## Next Low-Level Closures
 
-1. Expand process-mode compose support beyond explicit `command` services only
-   after driver-specific safety rules are defined for each framework.
+1. Expand framework-specific process-mode command inference with driver tests
+   for Rails, Django/FastAPI, Laravel, Go, Rust, Phoenix, and Spring Boot
+   compose build contexts.
+2. Add a `pier doctor process` check that explains missing host dependencies
+   for inferred commands before users hit runtime shell errors.
 
 ## Verification Gates
 
