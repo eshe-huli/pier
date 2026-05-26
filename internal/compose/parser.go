@@ -18,7 +18,7 @@ type ComposeFile struct {
 type ComposeService struct {
 	Image       string      `yaml:"image"`
 	Build       interface{} `yaml:"build"`
-	Ports       []string    `yaml:"ports"`
+	Ports       interface{} `yaml:"ports"`
 	Expose      interface{} `yaml:"expose"`
 	EnvFile     interface{} `yaml:"env_file"`
 	Environment interface{} `yaml:"environment"`
@@ -95,7 +95,7 @@ func SeparateServices(cf *ComposeFile) (infra []InfraService, apps []AppService)
 			app := AppService{
 				ComposeName: name,
 				Image:       svc.Image,
-				Ports:       svc.Ports,
+				Ports:       parsePortList(svc.Ports),
 				Expose:      parseStringList(svc.Expose),
 				EnvFiles:    parseStringList(svc.EnvFile),
 				Environment: parseEnvironment(svc.Environment),
@@ -193,6 +193,15 @@ func parseStringList(value interface{}) []string {
 			return nil
 		}
 		return []string{v}
+	case []string:
+		items := make([]string, 0, len(v))
+		for _, item := range v {
+			itemText := strings.TrimSpace(item)
+			if itemText != "" {
+				items = append(items, itemText)
+			}
+		}
+		return items
 	case []interface{}:
 		items := make([]string, 0, len(v))
 		for _, item := range v {
@@ -209,6 +218,59 @@ func parseStringList(value interface{}) []string {
 		}
 		return []string{itemText}
 	}
+}
+
+func parsePortList(value interface{}) []string {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case []string:
+		return parseStringList(v)
+	case []interface{}:
+		items := make([]string, 0, len(v))
+		for _, item := range v {
+			if port := parsePortSpec(item); port != "" {
+				items = append(items, port)
+			}
+		}
+		return items
+	default:
+		if port := parsePortSpec(value); port != "" {
+			return []string{port}
+		}
+		return nil
+	}
+}
+
+func parsePortSpec(value interface{}) string {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		target := scalarString(v["target"])
+		if target == "" {
+			return ""
+		}
+
+		port := target
+		if published := scalarString(v["published"]); published != "" {
+			port = published + ":" + target
+			if hostIP := scalarString(v["host_ip"]); hostIP != "" {
+				port = hostIP + ":" + port
+			}
+		}
+		if protocol := scalarString(v["protocol"]); protocol != "" {
+			port += "/" + protocol
+		}
+		return port
+	default:
+		return scalarString(value)
+	}
+}
+
+func scalarString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
 }
 
 // resolveEnvVar resolves ${VAR:-default} and ${VAR} patterns

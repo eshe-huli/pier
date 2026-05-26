@@ -32,6 +32,42 @@ services:
 	}
 }
 
+func TestParse_LongAndNumericComposePorts(t *testing.T) {
+	dir := t.TempDir()
+	content := `services:
+  api:
+    image: node:20
+    ports:
+      - target: 3000
+        published: "8080"
+        protocol: tcp
+      - 127.0.0.1:9229:9229
+    expose:
+      - 4010
+      - "4011"
+`
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cf, err := Parse(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, apps := SeparateServices(cf)
+	if len(apps) != 1 {
+		t.Fatalf("got %d app services, want 1", len(apps))
+	}
+
+	if got, want := apps[0].Ports, []string{"8080:3000/tcp", "127.0.0.1:9229:9229"}; !equalStringSlices(got, want) {
+		t.Fatalf("ports = %#v, want %#v", got, want)
+	}
+	if got, want := apps[0].Expose, []string{"4010", "4011"}; !equalStringSlices(got, want) {
+		t.Fatalf("expose = %#v, want %#v", got, want)
+	}
+}
+
 func TestParse_NoComposeFile(t *testing.T) {
 	dir := t.TempDir()
 
@@ -89,4 +125,16 @@ func TestParseFirstPort(t *testing.T) {
 			t.Errorf("ParseFirstPort(%v) = %d, want %d", tt.ports, got, tt.want)
 		}
 	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

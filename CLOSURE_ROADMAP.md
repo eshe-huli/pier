@@ -57,6 +57,8 @@ project files. Docker is the runtime adapter, not the product surface.
 - Compose process commands now execute from the service build context, so
   monorepo services such as `build: ./api` run their dev command in the
   expected working directory.
+- Compose parsing now accepts long-form and numeric `ports`/`expose` entries
+  before normalizing them back into Pier's existing port-selection path.
 - `pier up` now auto-selects the process runtime for detected non-compose app
   projects with known framework/Pierfile commands, while `--runtime docker`
   remains available as an explicit escape hatch.
