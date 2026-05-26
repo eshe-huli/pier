@@ -319,7 +319,7 @@ func handleStartService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if already running
-	if pid, running := orchestrator.IsLocalProcessRunning(meta.Dir); running {
+	if pid, running := orchestrator.IsLocalProcessMetaRunning(meta); running {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "already_running", "pid": pid,
 		})

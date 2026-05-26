@@ -312,6 +312,9 @@ func TestLocalProcessMetaResolutionAndLogs(t *testing.T) {
 	if got := LocalProcessLogPath(dir); got != filepath.Join(dir, ".pier", "dev.log") {
 		t.Fatalf("LocalProcessLogPath() = %q", got)
 	}
+	if got := LocalProcessLogPathForName(dir, "api"); got != filepath.Join(dir, ".pier", "api.log") {
+		t.Fatalf("LocalProcessLogPathForName() = %q", got)
+	}
 }
 
 func TestStartAndStopLocalProcessMeta(t *testing.T) {
@@ -337,11 +340,11 @@ func TestStartAndStopLocalProcessMeta(t *testing.T) {
 	if pid <= 0 {
 		t.Fatalf("pid = %d", pid)
 	}
-	if logPath != filepath.Join(dir, ".pier", "dev.log") {
+	if logPath != filepath.Join(dir, ".pier", "api.log") {
 		t.Fatalf("logPath = %q", logPath)
 	}
-	if gotPID, running := IsLocalProcessRunning(dir); !running || gotPID != pid {
-		t.Fatalf("IsLocalProcessRunning() = %d/%t, want %d/true", gotPID, running, pid)
+	if gotPID, running := IsLocalProcessMetaRunning(meta); !running || gotPID != pid {
+		t.Fatalf("IsLocalProcessMetaRunning() = %d/%t, want %d/true", gotPID, running, pid)
 	}
 	proxyFile := filepath.Join(home, ".pier", "traefik", "dynamic", "api.yaml")
 	if _, err := os.Stat(proxyFile); err != nil {
@@ -355,7 +358,7 @@ func TestStartAndStopLocalProcessMeta(t *testing.T) {
 	if !stopped {
 		t.Fatal("StopLocalProcessMeta reported not stopped")
 	}
-	if _, running := IsLocalProcessRunning(dir); running {
+	if _, running := IsLocalProcessMetaRunning(meta); running {
 		t.Fatal("process still running after stop")
 	}
 }

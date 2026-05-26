@@ -226,9 +226,11 @@ func startLocalProcess(spec AppSpec, command string, port int, envOverrides []st
 		return 0, "", fmt.Errorf("creating .pier directory: %w", err)
 	}
 
-	pidFile := LocalProcessPIDFile(spec.Dir)
-	logFile := LocalProcessLogPath(spec.Dir)
-	killExistingLocalProcess(pidFile)
+	pidFile := LocalProcessPIDFileForName(spec.Dir, spec.Name)
+	logFile := LocalProcessLogPathForName(spec.Dir, spec.Name)
+	for _, candidate := range localProcessPIDCandidates(spec.Dir, spec.Name) {
+		killExistingLocalProcess(candidate)
+	}
 
 	log, err := os.Create(logFile)
 	if err != nil {
@@ -266,9 +268,65 @@ func LocalProcessPIDFile(dir string) string {
 	return filepath.Join(dir, ".pier", "dev.pid")
 }
 
+// LocalProcessPIDFileForName returns the managed PID file for a named host-process app.
+func LocalProcessPIDFileForName(dir, name string) string {
+	stateName := localProcessStateName(name)
+	if stateName == "" {
+		return LocalProcessPIDFile(dir)
+	}
+	return filepath.Join(dir, ".pier", stateName+".pid")
+}
+
 // LocalProcessLogPath returns the managed log file for a host-process project.
 func LocalProcessLogPath(dir string) string {
 	return filepath.Join(dir, ".pier", "dev.log")
+}
+
+// LocalProcessLogPathForName returns the managed log file for a named host-process app.
+func LocalProcessLogPathForName(dir, name string) string {
+	stateName := localProcessStateName(name)
+	if stateName == "" {
+		return LocalProcessLogPath(dir)
+	}
+	return filepath.Join(dir, ".pier", stateName+".log")
+}
+
+func localProcessStateName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+
+	stateName := strings.Trim(b.String(), "-.")
+	if stateName == "" {
+		return "app"
+	}
+	return stateName
+}
+
+func localProcessPIDCandidates(dir, name string) []string {
+	scoped := LocalProcessPIDFileForName(dir, name)
+	legacy := LocalProcessPIDFile(dir)
+	if scoped == legacy {
+		return []string{scoped}
+	}
+	return []string{scoped, legacy}
 }
 
 // ResolveLocalProcessMeta looks up the process/proxy metadata for a known project.
@@ -350,7 +408,21 @@ func ListLocalProcessMetas() ([]config.LinkMeta, error) {
 
 // IsLocalProcessRunning checks whether the managed PID still points at a process.
 func IsLocalProcessRunning(dir string) (int, bool) {
-	data, err := os.ReadFile(LocalProcessPIDFile(dir))
+	return isLocalProcessRunningAt(LocalProcessPIDFile(dir))
+}
+
+// IsLocalProcessMetaRunning checks whether named or legacy metadata points at a process.
+func IsLocalProcessMetaRunning(meta config.LinkMeta) (int, bool) {
+	for _, pidFile := range localProcessPIDCandidates(meta.Dir, meta.Name) {
+		if pid, running := isLocalProcessRunningAt(pidFile); running {
+			return pid, true
+		}
+	}
+	return 0, false
+}
+
+func isLocalProcessRunningAt(pidFile string) (int, bool) {
+	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0, false
 	}
@@ -397,25 +469,28 @@ func StopLocalProcessMeta(meta config.LinkMeta) (bool, error) {
 	if meta.Dir == "" {
 		return false, fmt.Errorf("process metadata for %s is missing directory", meta.Name)
 	}
-	pidFile := LocalProcessPIDFile(meta.Dir)
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
+	for _, pidFile := range localProcessPIDCandidates(meta.Dir, meta.Name) {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return false, fmt.Errorf("reading process pid file: %w", err)
 		}
-		return false, fmt.Errorf("reading process pid file: %w", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil || pid <= 0 {
+			_ = os.Remove(pidFile)
+			return false, fmt.Errorf("invalid process pid for %s", meta.Name)
+		}
+
+		if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
+			return false, fmt.Errorf("stopping local process %s: %w", meta.Name, err)
+		}
 		_ = os.Remove(pidFile)
-		return false, fmt.Errorf("invalid process pid for %s", meta.Name)
+		return true, nil
 	}
 
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
-		return false, fmt.Errorf("stopping local process %s: %w", meta.Name, err)
-	}
-	_ = os.Remove(pidFile)
-	return true, nil
+	return false, nil
 }
 
 func killExistingLocalProcess(pidFile string) {

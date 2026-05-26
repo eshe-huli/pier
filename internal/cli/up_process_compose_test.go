@@ -11,6 +11,7 @@ import (
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/orchestrator"
 	"github.com/eshe-huli/pier/internal/planner"
+	"github.com/eshe-huli/pier/internal/registry"
 )
 
 func TestRunUpComposeProcessRuntimeAllowsCommandBackedApp(t *testing.T) {
@@ -84,6 +85,71 @@ func TestRunUpComposeProcessRuntimeRunsCommandFromBuildContext(t *testing.T) {
 	want := cleanRealPath(t, filepath.Join(dir, "api"))
 	if got != want {
 		t.Fatalf("expected process command to run from build context %q, got %q", want, got)
+	}
+}
+
+func TestRunUpComposeProcessRuntimeKeepsMultiAppState(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestFile(t, dir, "docker-compose.yml", `services:
+  api:
+    image: node:20
+    command: "true"
+    ports:
+      - "4000:4000"
+  worker:
+    image: node:20
+    command: "true"
+    ports:
+      - "5000:5000"
+`)
+
+	plan, err := planner.PlanProject(dir)
+	if err != nil {
+		t.Fatalf("PlanProject returned error: %v", err)
+	}
+
+	cfg := config.Default()
+	if err := runUpCompose(
+		context.Background(),
+		dir,
+		plan,
+		cfg,
+		orchestrator.LocalProcessAdapter{},
+	); err != nil {
+		t.Fatalf("runUpCompose returned error: %v", err)
+	}
+
+	for _, name := range []string{"api", "worker"} {
+		if _, err := os.Stat(filepath.Join(home, ".pier", "links", name+".json")); err != nil {
+			t.Fatalf("expected %s link metadata: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".pier", "traefik", "dynamic", name+".yaml")); err != nil {
+			t.Fatalf("expected %s proxy config: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".pier", name+".pid")); err != nil {
+			t.Fatalf("expected %s app-scoped pid file: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".pier", name+".log")); err != nil {
+			t.Fatalf("expected %s app-scoped log file: %v", name, err)
+		}
+	}
+
+	projects, err := registry.Load()
+	if err != nil {
+		t.Fatalf("loading registry: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, project := range projects {
+		if project.Dir == dir {
+			seen[project.Name] = true
+		}
+	}
+	for _, name := range []string{"api", "worker"} {
+		if !seen[name] {
+			t.Fatalf("registry missing %s app entry: %#v", name, projects)
+		}
 	}
 }
 

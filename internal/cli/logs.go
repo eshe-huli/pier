@@ -43,9 +43,15 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	if meta, found, err := orchestrator.ResolveLocalProcessMeta(name); err != nil {
 		return err
 	} else if found {
-		logPath := orchestrator.LocalProcessLogPath(meta.Dir)
+		logPath := orchestrator.LocalProcessLogPathForName(meta.Dir, meta.Name)
 		if _, err := os.Stat(logPath); err == nil {
 			return runTail(logPath)
+		}
+		legacyLogPath := orchestrator.LocalProcessLogPath(meta.Dir)
+		if legacyLogPath != logPath {
+			if _, err := os.Stat(legacyLogPath); err == nil {
+				return runTail(legacyLogPath)
+			}
 		}
 		if !docker.IsContainerRunning(context.Background(), name) {
 			return fmt.Errorf("no process log found for %s at %s", name, logPath)

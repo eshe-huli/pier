@@ -63,7 +63,7 @@ func Register(p Project) error {
 	// Update existing or append
 	found := false
 	for i, existing := range projects {
-		if existing.Name == p.Name || existing.Dir == p.Dir {
+		if sameProject(existing, p) {
 			projects[i] = p
 			found = true
 			break
@@ -74,6 +74,28 @@ func Register(p Project) error {
 	}
 
 	return save(projects)
+}
+
+func sameProject(existing Project, next Project) bool {
+	if existing.Name != "" && next.Name != "" && existing.Name == next.Name {
+		return true
+	}
+	if existing.Dir == "" || next.Dir == "" || existing.Dir != next.Dir {
+		return false
+	}
+	if supportsMultipleProjectsPerDir(existing.Type) || supportsMultipleProjectsPerDir(next.Type) {
+		return existing.Name == "" || next.Name == ""
+	}
+	return true
+}
+
+func supportsMultipleProjectsPerDir(projectType string) bool {
+	switch projectType {
+	case "linked", "proxy", "process":
+		return true
+	default:
+		return false
+	}
 }
 
 // Remove removes a project from the registry by name
