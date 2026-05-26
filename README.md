@@ -121,6 +121,7 @@ pier up                       # Detects the framework/Pierfile command,
 pier up --runtime process     # Run compose app services with an explicit
                                # command, Pierfile command, or known
                                # framework command as host processes
+pier doctor process            # Check inferred commands and host dependencies
 ```
 
 Compose process mode infers host commands from app build contexts for common
@@ -211,6 +212,7 @@ Different TLDs, different nginx server blocks. No conflicts.
 | `pier up` | Auto-select the runtime; detected app projects run as host processes behind a `.dock` route |
 | `pier up --runtime docker` | Force Docker for the detected project |
 | `pier up --runtime process` | Start or link the detected app as a host process behind a `.dock` route |
+| `pier doctor process [dir]` | Show inferred process commands and missing host executables or wrappers |
 | `pier run <name> --image <image> --dry-run` | Preview an ad hoc Docker run plan without starting infra |
 | `pier logs <name>` | Show Docker logs or tail `.pier/dev.log` for process-runtime projects |
 | `pier proxy <name> <port>` | Route `<name>.dock` → `localhost:<port>` |

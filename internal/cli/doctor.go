@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -12,6 +16,8 @@ import (
 	"github.com/eshe-huli/pier/internal/config"
 	"github.com/eshe-huli/pier/internal/dns"
 	"github.com/eshe-huli/pier/internal/docker"
+	"github.com/eshe-huli/pier/internal/orchestrator"
+	"github.com/eshe-huli/pier/internal/planner"
 	"github.com/eshe-huli/pier/internal/proxy"
 )
 
@@ -22,8 +28,17 @@ var doctorCmd = &cobra.Command{
 	RunE:  runDoctor,
 }
 
+var doctorProcessCmd = &cobra.Command{
+	Use:   "process [dir]",
+	Short: "Diagnose local process runtime dependencies",
+	Long:  `Checks the inferred process-mode command and host executable dependencies for a Pier project.`,
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runDoctorProcess,
+}
+
 func init() {
 	rootCmd.AddCommand(doctorCmd)
+	doctorCmd.AddCommand(doctorProcessCmd)
 }
 
 type checkResult struct {
@@ -211,4 +226,174 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	return nil
+}
+
+func runDoctorProcess(cmd *cobra.Command, args []string) error {
+	dir := "."
+	if len(args) > 0 {
+		dir = args[0]
+	}
+
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("resolving project directory: %w", err)
+	}
+
+	header := color.New(color.FgCyan, color.Bold)
+	fmt.Println()
+	header.Println("  🩺 Pier Process Doctor")
+	fmt.Printf("  %s\n\n", dim(absDir))
+
+	checks, err := processDoctorChecks(absDir, exec.LookPath, os.Stat)
+	if err != nil {
+		return err
+	}
+	printDoctorChecks(checks)
+
+	return nil
+}
+
+type lookPathFunc func(string) (string, error)
+type statFunc func(string) (os.FileInfo, error)
+
+func processDoctorChecks(dir string, lookPath lookPathFunc, stat statFunc) ([]checkResult, error) {
+	runPlan, err := planner.PlanProject(dir)
+	if err != nil {
+		return nil, fmt.Errorf("planning project: %w", err)
+	}
+
+	checks := []checkResult{}
+	adapter := orchestrator.LocalProcessAdapter{}
+	for _, app := range runPlan.Apps {
+		spec := appSpecFromPlan(runPlan, app)
+		_, port, err := adapter.BuildImage(context.Background(), spec)
+		if err != nil {
+			checks = append(checks, checkResult{
+				Name:   fmt.Sprintf("%s process command", app.Name),
+				Detail: "not inferred",
+				Fix:    "Set a Pierfile command, add command: to docker-compose.yml, or use --runtime docker",
+			})
+			continue
+		}
+
+		command := orchestrator.LocalProcessCommand(spec, port)
+		if command == "" {
+			checks = append(checks, checkResult{
+				Name:   fmt.Sprintf("%s process command", app.Name),
+				Detail: "not inferred",
+				Fix:    "Set a Pierfile command, add command: to docker-compose.yml, or use --runtime docker",
+			})
+			continue
+		}
+
+		checks = append(checks, checkResult{
+			Name:   fmt.Sprintf("%s process command", app.Name),
+			OK:     true,
+			Detail: command,
+		})
+		checks = append(checks, processCommandDependency(command, processBuildDir(spec), lookPath, stat))
+	}
+
+	return checks, nil
+}
+
+func processCommandDependency(command, buildDir string, lookPath lookPathFunc, stat statFunc) checkResult {
+	executable := commandExecutable(command)
+	result := checkResult{
+		Name: fmt.Sprintf("process dependency '%s'", executable),
+	}
+	if executable == "" {
+		result.Detail = "not found"
+		result.Fix = "Set a concrete command executable in Pierfile or docker-compose.yml"
+		return result
+	}
+
+	if isProjectLocalExecutable(executable) {
+		path := executable
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(buildDir, executable)
+		}
+		info, err := stat(path)
+		if err != nil {
+			result.Detail = "not found"
+			result.Fix = fmt.Sprintf("Add %s under %s or change the process command", executable, buildDir)
+			return result
+		}
+		if info.Mode()&0111 == 0 {
+			result.Detail = "not executable"
+			result.Fix = fmt.Sprintf("Run chmod +x %s or change the process command", path)
+			return result
+		}
+		result.OK = true
+		result.Detail = path
+		return result
+	}
+
+	path, err := lookPath(executable)
+	if err != nil {
+		result.Detail = "not found"
+		result.Fix = fmt.Sprintf("Install %s or change the process command", executable)
+		return result
+	}
+	result.OK = true
+	result.Detail = path
+	return result
+}
+
+func commandExecutable(command string) string {
+	for _, field := range strings.Fields(command) {
+		token := strings.Trim(field, `"'`)
+		if strings.Contains(token, "=") && !strings.HasPrefix(token, "./") && !strings.HasPrefix(token, "../") {
+			continue
+		}
+		return token
+	}
+	return ""
+}
+
+func isProjectLocalExecutable(executable string) bool {
+	return filepath.IsAbs(executable) || strings.HasPrefix(executable, "./") || strings.HasPrefix(executable, "../")
+}
+
+func processBuildDir(spec orchestrator.AppSpec) string {
+	buildDir := spec.Dir
+	if spec.BuildCtx != "" {
+		buildDir = spec.BuildCtx
+		if !filepath.IsAbs(buildDir) {
+			buildDir = filepath.Join(spec.Dir, buildDir)
+		}
+	}
+	if spec.WorkingDir != "" && !filepath.IsAbs(spec.WorkingDir) {
+		buildDir = filepath.Join(buildDir, spec.WorkingDir)
+	}
+	return filepath.Clean(buildDir)
+}
+
+func printDoctorChecks(checks []checkResult) {
+	passed := 0
+	failed := 0
+	for _, c := range checks {
+		if c.OK {
+			fmt.Printf("  %s  %-30s %s\n", green("✅"), c.Name, dim(c.Detail))
+			passed++
+		} else {
+			fmt.Printf("  %s  %-30s %s\n", red("❌"), c.Name, red(c.Detail))
+			if c.Fix != "" {
+				fmt.Printf("      %s %s\n", yellow("Fix:"), cyan(c.Fix))
+			}
+			failed++
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s\n", dim("─────────────────────────────"))
+	if failed == 0 {
+		fmt.Printf("  %s All %d checks passed!\n", green("✅"), passed)
+	} else {
+		fmt.Printf("  %s passed, %s failed\n",
+			green(fmt.Sprintf("%d", passed)),
+			red(fmt.Sprintf("%d", failed)),
+		)
+	}
+	fmt.Println()
 }

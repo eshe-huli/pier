@@ -68,11 +68,15 @@ project files. Docker is the runtime adapter, not the product surface.
 - Process command inference now has driver coverage for Rails, Django/FastAPI
   pyproject projects, Laravel, Go, Rust, Phoenix, and Gradle Spring Boot compose
   build contexts.
+- `pier doctor process` now explains inferred process commands and missing host
+  executables or project-local wrappers before the user hits shell startup
+  errors.
 
 ## Next Low-Level Closures
 
-1. Add a `pier doctor process` check that explains missing host dependencies
-   for inferred commands before users hit runtime shell errors.
+1. Add a first-run `pier up --runtime process --dry-run` hint that suggests
+   `pier doctor process` when an inferred command depends on a missing host
+   executable.
 
 ## Verification Gates
 
