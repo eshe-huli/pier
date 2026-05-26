@@ -7,9 +7,10 @@
 ## Philosophy
 
 ```
-Pier = docker run + intelligence
+Pier = Valet-style local app routing + runtime adapters
 
-- Don't replace Docker
+- Prefer native app processes when that keeps feedback fast
+- Use Docker for dependency services and teams that choose containers
 - Don't touch dev's files
 - Don't force team adoption
 - Share when possible
@@ -82,14 +83,16 @@ pier up
 ## Commands (v0.2)
 
 ```bash
-pier run <image>    # docker run + pier-net + env override
-pier up             # Detect from compose/Dockerfile + build + run
+pier run <image>    # Docker run + pier-net + env override
+pier up             # Detect project + choose runtime adapter
+pier up --runtime process
+pier link           # Native process route, like Valet proxy/link
 pier down           # Stop
 pier ls             # List running projects
 pier init           # Detect framework → Generate Dockerfile + .pier (if missing)
 ```
 
-**5 commands. That's the entire CLI.**
+**The CLI should feel small even when the runtime adapters get smarter.**
 
 ---
 

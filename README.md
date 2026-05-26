@@ -116,6 +116,8 @@ pier proxy api 8080           # → http://api.dock
 
 pier up --runtime process     # Detects the framework/Pierfile command,
                                # starts it when known, and routes the domain
+                               # For compose projects, app services with an
+                               # explicit command can run as host processes
 ```
 
 ## How It Works

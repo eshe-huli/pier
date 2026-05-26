@@ -181,7 +181,7 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 	}
 
 	if runtimeAdapter.Name() == "process" {
-		return fmt.Errorf("process runtime does not support docker-compose app services yet; use the default docker runtime for compose projects")
+		return runUpComposeProcess(ctx, runPlan, cfg, sharedServices, dbCreated, runtimeAdapter)
 	}
 
 	// Build and run app services
@@ -243,6 +243,66 @@ func runUpCompose(ctx context.Context, dir string, runPlan *planner.Plan, cfg *c
 	_ = registry.Register(registry.Project{Name: projectName, Dir: dir, Type: "docker"})
 
 	return nil
+}
+
+func runUpComposeProcess(ctx context.Context, runPlan *planner.Plan, cfg *config.Config, sharedServices []infra.SharedService, dbCreated bool, runtimeAdapter orchestrator.RuntimeAdapter) error {
+	projectName := runPlan.ProjectName
+	apps := runPlan.Apps
+	envOverrides := planner.RuntimeEnv(projectName, runtime.BuildEnvOverrides(sharedServices))
+
+	for i, app := range apps {
+		if !hasComposeProcessCommand(app) {
+			return fmt.Errorf("process runtime for compose app %q requires an explicit command; add command: to docker-compose.yml or use the default docker runtime", app.ComposeName)
+		}
+
+		spec := appSpecFromPlan(runPlan, app)
+		spec.RuntimeEnvLast = true
+		spec.Route = true
+		spec.RegisterType = runtimeAdapter.Name()
+
+		step(3+i, fmt.Sprintf("Starting local process route for %s...", cyan(app.Name)))
+		image, port, err := runtimeAdapter.BuildImage(ctx, spec)
+		if err != nil {
+			return fmt.Errorf("resolving %s: %w", app.Name, err)
+		}
+		if err := runtimeAdapter.RunApp(ctx, spec, image, port, cfg, envOverrides); err != nil {
+			return fmt.Errorf("running %s: %w", app.Name, err)
+		}
+	}
+
+	fmt.Println()
+	for _, app := range apps {
+		fmt.Printf("  %s %s\n", green("✅"), bold(app.Domain(cfg.TLD)))
+	}
+	fmt.Println()
+
+	if len(sharedServices) > 0 {
+		fmt.Println("  Services:")
+		for _, svc := range sharedServices {
+			fmt.Printf("    📦 %s (shared)\n", svc.Container)
+		}
+		fmt.Println()
+	}
+
+	if dbCreated {
+		fmt.Printf("  Database: %s (auto-created)\n", projectName)
+		fmt.Println()
+	}
+
+	return nil
+}
+
+func hasComposeProcessCommand(app planner.AppPlan) bool {
+	switch command := app.Command.(type) {
+	case string:
+		return strings.TrimSpace(command) != ""
+	case []string:
+		return len(command) > 0
+	case []interface{}:
+		return len(command) > 0
+	default:
+		return false
+	}
 }
 
 // runUpBuild handles the default build+run path from a planner app plan.

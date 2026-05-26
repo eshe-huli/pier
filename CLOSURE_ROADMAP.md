@@ -51,12 +51,14 @@ project files. Docker is the runtime adapter, not the product surface.
   `pier down --all` includes registered process-mode projects, `pier logs`
   tails `.pier/dev.log`, and the dashboard can start, stop, and restart
   command-backed local processes through the same runtime path.
+- `pier up --runtime process` now supports docker-compose projects whose app
+  service declares an explicit `command`, reusing Pier shared infra while
+  running the app itself as a host process.
 
 ## Next Low-Level Closures
 
-1. Decide how far process mode should go for docker-compose projects: keep app
-   services on Docker by default, or map explicitly declared commands to host
-   processes while reusing compose infra.
+1. Expand process-mode compose support beyond explicit `command` services only
+   after driver-specific safety rules are defined for each framework.
 
 ## Verification Gates
 
