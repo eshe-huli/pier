@@ -30,7 +30,8 @@ What [Laravel Valet](https://laravel.com/docs/valet) did for PHP, Pier does for 
 ```bash
 pier init                    # one-time setup
 pier proxy myapp 3000        # http://myapp.dock → localhost:3000
-pier up --runtime process    # http://myapp.dock → detected local dev server
+pier up                      # http://myapp.dock → detected local dev server
+pier up --runtime docker     # force Docker for the detected project
 docker compose up            # http://app.dock → container (automatic)
 ```
 
@@ -68,7 +69,8 @@ pier status                  # System health check
 pier doctor                  # Diagnose issues with fix suggestions
 pier dashboard               # Open Traefik dashboard in browser
 pier up --dry-run            # Preview what Pier would run without side effects
-pier up --runtime process    # Run/link the project as a local process
+pier up                      # Run/link detected app projects as local processes
+pier up --runtime docker     # Force Docker for the detected project
 pier logs myapp              # Tail Docker or process-runtime logs
 pier run api --image node:20 --dry-run
 pier down myapp              # Stop Docker or process-runtime project
@@ -114,10 +116,10 @@ pier proxy myapp 3000         # → http://myapp.dock
 go run main.go                # Running on port 8080
 pier proxy api 8080           # → http://api.dock
 
-pier up --runtime process     # Detects the framework/Pierfile command,
+pier up                       # Detects the framework/Pierfile command,
                                # starts it when known, and routes the domain
-                               # For compose projects, app services with an
-                               # explicit command can run as host processes
+pier up --runtime process     # Run compose app services with an explicit
+                               # command as host processes
 ```
 
 ## How It Works
@@ -200,6 +202,8 @@ Different TLDs, different nginx server blocks. No conflicts.
 | `pier init` | One-time setup (Docker network, Traefik, dnsmasq, nginx) |
 | `pier ls` | List all active services with their domains |
 | `pier up --dry-run` | Preview the detected app/services/domains without touching Docker or project files |
+| `pier up` | Auto-select the runtime; detected app projects run as host processes behind a `.dock` route |
+| `pier up --runtime docker` | Force Docker for the detected project |
 | `pier up --runtime process` | Start or link the detected app as a host process behind a `.dock` route |
 | `pier run <name> --image <image> --dry-run` | Preview an ad hoc Docker run plan without starting infra |
 | `pier logs <name>` | Show Docker logs or tail `.pier/dev.log` for process-runtime projects |

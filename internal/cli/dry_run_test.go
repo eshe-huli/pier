@@ -29,6 +29,9 @@ func TestPierUpDryRunPlansWithoutSideEffects(t *testing.T) {
 	})
 
 	assertOutputContains(t, output, "Dry run: pier up would execute this plan")
+	assertOutputContains(t, output, "Runtime:")
+	assertOutputContains(t, output, "process")
+	assertOutputContains(t, output, "command=npx next dev -p 3000")
 	assertOutputContains(t, output, "Framework:")
 	assertOutputContains(t, output, "nextjs")
 	assertOutputContains(t, output, "No Docker, proxy, registry, manifest, or gitignore changes were made.")
@@ -69,6 +72,28 @@ func TestPierUpDryRunShowsProcessRuntime(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".pier", "registry.json")); !os.IsNotExist(err) {
 		t.Fatalf("dry run wrote registry: %v", err)
 	}
+}
+
+func TestPierUpDryRunCanForceDockerRuntime(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeTestFile(t, dir, "package.json", `{"dependencies":{"next":"15.0.0"}}`)
+	chdir(t, dir)
+
+	restore := setUpGlobalsForTest()
+	defer restore()
+	upDryRun = true
+	upRuntime = "docker"
+
+	output := captureStdout(t, func() {
+		if err := runUp(&cobra.Command{}, nil); err != nil {
+			t.Fatalf("runUp returned error: %v", err)
+		}
+	})
+
+	assertOutputContains(t, output, "Runtime:")
+	assertOutputContains(t, output, "docker")
 }
 
 func TestPierRunDryRunPlansImageServicesAndRoute(t *testing.T) {
@@ -112,7 +137,7 @@ func setUpGlobalsForTest() func() {
 	upDetach = true
 	upBuild = false
 	upDryRun = false
-	upRuntime = "docker"
+	upRuntime = "auto"
 	return func() {
 		upDetach = oldDetach
 		upBuild = oldBuild

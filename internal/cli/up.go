@@ -35,6 +35,7 @@ Examples:
   pier up --detach
   pier up --build
   pier up --dry-run
+  pier up --runtime docker
   pier up --runtime process`,
 	RunE: runUp,
 }
@@ -43,7 +44,7 @@ func init() {
 	upCmd.Flags().BoolVarP(&upDetach, "detach", "d", true, "Run in background (default true)")
 	upCmd.Flags().BoolVar(&upBuild, "build", false, "Force rebuild even if image exists")
 	upCmd.Flags().BoolVar(&upDryRun, "dry-run", false, "Print the Pier plan without touching Docker or project files")
-	upCmd.Flags().StringVar(&upRuntime, "runtime", "docker", "Runtime adapter: docker or process")
+	upCmd.Flags().StringVar(&upRuntime, "runtime", "auto", "Runtime adapter: auto, docker, or process")
 	rootCmd.AddCommand(upCmd)
 }
 
@@ -65,7 +66,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("planning project: %w", err)
 	}
 
-	runtimeAdapter, err := upRuntimeAdapter()
+	runtimeAdapter, err := upRuntimeAdapter(runPlan)
 	if err != nil {
 		return err
 	}
@@ -437,15 +438,39 @@ func printUpDryRun(runPlan *planner.Plan, cfg *config.Config, runtimeAdapter orc
 	fmt.Println("  No Docker, proxy, registry, manifest, or gitignore changes were made.")
 }
 
-func upRuntimeAdapter() (orchestrator.RuntimeAdapter, error) {
+func upRuntimeAdapter(runPlan *planner.Plan) (orchestrator.RuntimeAdapter, error) {
 	switch strings.ToLower(strings.TrimSpace(upRuntime)) {
-	case "", "docker":
+	case "", "auto":
+		return autoRuntimeAdapter(runPlan), nil
+	case "docker":
 		return orchestrator.DockerAdapter{}, nil
 	case "process":
 		return orchestrator.LocalProcessAdapter{}, nil
 	default:
-		return nil, fmt.Errorf("unsupported runtime %q (expected docker or process)", upRuntime)
+		return nil, fmt.Errorf("unsupported runtime %q (expected auto, docker, or process)", upRuntime)
 	}
+}
+
+func autoRuntimeAdapter(runPlan *planner.Plan) orchestrator.RuntimeAdapter {
+	if prefersProcessRuntime(runPlan) {
+		return orchestrator.LocalProcessAdapter{}
+	}
+	return orchestrator.DockerAdapter{}
+}
+
+func prefersProcessRuntime(runPlan *planner.Plan) bool {
+	if runPlan == nil || runPlan.ComposeFile != nil || len(runPlan.Apps) == 0 {
+		return false
+	}
+
+	app := runPlan.Apps[0]
+	port := app.Port
+	if port == 0 && runPlan.Framework != nil {
+		port = runPlan.Framework.Port
+	}
+
+	spec := appSpecFromPlan(runPlan, app)
+	return orchestrator.LocalProcessCommand(spec, port) != ""
 }
 
 func appSpecFromPlan(runPlan *planner.Plan, app planner.AppPlan) orchestrator.AppSpec {
